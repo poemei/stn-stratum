@@ -1,0 +1,815 @@
+/* Copyright (c) 2026 STN-Labz. All rights reserved. */
+#include "stn_stratum_server.h"
+
+#ifdef _WIN32
+
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#pragma comment(lib,"Ws2_32.lib")
+
+#define STN_INVALID_SOCKET_VALUE ((uintptr_t)INVALID_SOCKET)
+
+struct stn_stratum_client_session {
+    uintptr_t socket;
+    uint8_t rx[STN_MINER_SUBMIT_SIZE];
+    size_t rx_used;
+    uint8_t sent_job_id[32];
+    int has_job;
+    struct stn_stratum_client_session *next;
+};
+
+static uint32_t read32be(const uint8_t *p)
+{
+    return ((uint32_t)p[0]<<24)|
+           ((uint32_t)p[1]<<16)|
+           ((uint32_t)p[2]<<8)|
+           (uint32_t)p[3];
+}
+
+static uint64_t read64be(const uint8_t *p)
+{
+    uint64_t v=0u;
+    size_t i;
+    for(i=0;i<8u;i++){v=(v<<8)|p[i];}
+    return v;
+}
+
+static void write32be(uint8_t *p,uint32_t v)
+{
+    p[0]=(uint8_t)(v>>24);
+    p[1]=(uint8_t)(v>>16);
+    p[2]=(uint8_t)(v>>8);
+    p[3]=(uint8_t)v;
+}
+
+static void timestamp_utc(char out[32])
+{
+    time_t now=time(NULL);
+    struct tm value;
+
+    if(gmtime_s(&value,&now)!=0){
+        strcpy_s(out,32,"0000-00-00T00:00:00Z");
+        return;
+    }
+
+    (void)strftime(out,32,"%Y-%m-%dT%H:%M:%SZ",&value);
+}
+
+static void log_line(stn_stratum_server *server,const char *format,...)
+{
+    char stamp[32];
+    va_list args;
+    va_list copy;
+
+    timestamp_utc(stamp);
+
+    printf("[%s] ",stamp);
+
+    va_start(args,format);
+    va_copy(copy,args);
+
+    vprintf(format,args);
+    printf("\n");
+    fflush(stdout);
+
+    if(server!=NULL && server->log_file!=NULL){
+        fprintf(server->log_file,"[%s] ",stamp);
+        vfprintf(server->log_file,format,copy);
+        fprintf(server->log_file,"\n");
+        fflush(server->log_file);
+    }
+
+    va_end(copy);
+    va_end(args);
+}
+
+static int log_open(stn_stratum_server *server)
+{
+    if(!CreateDirectoryA("logs",NULL)){
+        DWORD e=GetLastError();
+        if(e!=ERROR_ALREADY_EXISTS){return 0;}
+    }
+
+    if(fopen_s(&server->log_file,STN_STRATUM_LOG_PATH,"a")!=0){
+        server->log_file=NULL;
+        return 0;
+    }
+
+    return 1;
+}
+
+static void log_close(stn_stratum_server *server)
+{
+    if(server->log_file!=NULL){
+        fclose(server->log_file);
+        server->log_file=NULL;
+    }
+}
+
+static void hex8(char out[17],const uint8_t value[32])
+{
+    static const char table[]="0123456789abcdef";
+    size_t i;
+
+    for(i=0;i<8u;i++){
+        out[i*2u]=table[(value[i]>>4)&0x0fu];
+        out[i*2u+1u]=table[value[i]&0x0fu];
+    }
+    out[16]='\0';
+}
+
+static int winsock_open(stn_stratum_server *server)
+{
+    WSADATA wsa;
+
+    if(server->winsock_ready){return 1;}
+
+    if(WSAStartup(MAKEWORD(2,2),&wsa)!=0){return 0;}
+
+    server->winsock_ready=1;
+    return 1;
+}
+
+static void winsock_close(stn_stratum_server *server)
+{
+    if(server->winsock_ready){
+        WSACleanup();
+        server->winsock_ready=0;
+    }
+}
+
+static int send_all(SOCKET s,const uint8_t *p,size_t n)
+{
+    while(n!=0u){
+        int sent=send(s,(const char *)p,(int)n,0);
+        if(sent<=0){return 0;}
+        p+=(size_t)sent;
+        n-=(size_t)sent;
+    }
+    return 1;
+}
+
+static void client_remove(
+    stn_stratum_server *server,
+    stn_stratum_client_session *client,
+    const char *reason)
+{
+    stn_stratum_client_session **link;
+
+    if(server==NULL || client==NULL){return;}
+
+    link=&server->clients;
+    while(*link!=NULL && *link!=client){
+        link=&(*link)->next;
+    }
+
+    if(*link==NULL){return;}
+
+    *link=client->next;
+
+    if((SOCKET)client->socket!=INVALID_SOCKET){
+        closesocket((SOCKET)client->socket);
+        client->socket=STN_INVALID_SOCKET_VALUE;
+    }
+
+    if(server->client_count!=0u){
+        server->client_count--;
+    }
+
+    if(reason!=NULL){
+        log_line(
+            server,
+            "CLIENT disconnected: %s; clients=%zu.",
+            reason,
+            server->client_count);
+    }
+
+    free(client);
+}
+
+static int listener_open(stn_stratum_server *server)
+{
+    SOCKET s;
+    struct sockaddr_in addr;
+    u_long nonblocking=1u;
+
+    if(!winsock_open(server)){
+        log_line(server,"ERROR Winsock initialization failed.");
+        return 0;
+    }
+
+    s=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
+    if(s==INVALID_SOCKET){
+        log_line(server,"ERROR listener socket failed: WSA=%d.",WSAGetLastError());
+        return 0;
+    }
+
+    memset(&addr,0,sizeof(addr));
+    addr.sin_family=AF_INET;
+    addr.sin_addr.s_addr=htonl(INADDR_ANY);
+    addr.sin_port=htons(STN_STRATUM_DEFAULT_PORT);
+
+    if(bind(s,(const struct sockaddr *)&addr,sizeof(addr))!=0){
+        log_line(server,"ERROR bind 0.0.0.0:%u failed: WSA=%d.",
+            (unsigned)STN_STRATUM_DEFAULT_PORT,WSAGetLastError());
+        closesocket(s);
+        return 0;
+    }
+
+    if(listen(s,SOMAXCONN)!=0){
+        log_line(server,"ERROR listen failed: WSA=%d.",WSAGetLastError());
+        closesocket(s);
+        return 0;
+    }
+
+    if(ioctlsocket(s,FIONBIO,&nonblocking)!=0){
+        log_line(server,"ERROR listener nonblocking failed: WSA=%d.",
+            WSAGetLastError());
+        closesocket(s);
+        return 0;
+    }
+
+    server->listen_socket=(uintptr_t)s;
+    log_line(server,"LISTEN 0.0.0.0:%u ready.",
+        (unsigned)STN_STRATUM_DEFAULT_PORT);
+    return 1;
+}
+
+static void listener_close(stn_stratum_server *server)
+{
+    SOCKET s=(SOCKET)server->listen_socket;
+
+    if(s!=INVALID_SOCKET){
+        closesocket(s);
+        server->listen_socket=STN_INVALID_SOCKET_VALUE;
+        log_line(server,"LISTEN port %u closed.",
+            (unsigned)STN_STRATUM_DEFAULT_PORT);
+    }
+}
+
+static int client_send_job(
+    stn_stratum_server *server,
+    stn_stratum_client_session *client)
+{
+    uint8_t header[STN_MINER_JOB_HEADER_SIZE];
+    uint32_t block_length;
+    SOCKET socket;
+
+    if(client==NULL || !server->have_work){return 1;}
+
+    socket=(SOCKET)client->socket;
+    if(socket==INVALID_SOCKET){return 0;}
+
+    block_length=(uint32_t)(server->active_template_length-68u);
+
+    memset(header,0,sizeof(header));
+    memcpy(header,STN_MINER_MAGIC,4);
+    header[4]=STN_MINER_VERSION;
+    header[5]=STN_MINER_JOB;
+    memcpy(header+8,server->active_job_id,32);
+
+    if(block_length<STN_MINER_CHAIN_HEADER_SIZE){
+        log_line(server,
+            "ERROR active Chain template block too small: %u bytes.",
+            (unsigned)block_length);
+        return 0;
+    }
+
+    memcpy(
+        header+40,
+        server->active_template+68u+STN_MINER_CHAIN_TARGET_OFFSET,
+        32u);
+
+    write32be(header+72,block_length);
+    memcpy(
+        header+76,
+        server->active_template+68u+STN_MINER_CHAIN_NONCE_OFFSET,
+        8u);
+
+    if(!send_all(socket,header,sizeof(header)) ||
+       !send_all(socket,server->active_template+68u,block_length))
+    {
+        client_remove(server,client,"job send failed");
+        return 0;
+    }
+
+    memcpy(client->sent_job_id,server->active_job_id,32);
+    client->has_job=1;
+
+    {
+        char job[17];
+        hex8(job,server->active_job_id);
+        log_line(server,"CLIENT job sent job=%s... block=%u bytes.",
+            job,(unsigned)block_length);
+    }
+
+    return 1;
+}
+
+static void accept_clients(stn_stratum_server *server)
+{
+    SOCKET listener=(SOCKET)server->listen_socket;
+    SOCKET socket;
+    struct sockaddr_storage peer;
+    int peer_length;
+    u_long nonblocking;
+
+    for(;;){
+        stn_stratum_client_session *client;
+
+        peer_length=(int)sizeof(peer);
+        socket=accept(listener,(struct sockaddr *)&peer,&peer_length);
+
+        if(socket==INVALID_SOCKET){
+            if(WSAGetLastError()==WSAEWOULDBLOCK){return;}
+            log_line(server,"WARN accept failed: WSA=%d.",WSAGetLastError());
+            return;
+        }
+
+        nonblocking=1u;
+        if(ioctlsocket(socket,FIONBIO,&nonblocking)!=0){
+            log_line(server,"CLIENT nonblocking setup failed: WSA=%d.",
+                WSAGetLastError());
+            closesocket(socket);
+            continue;
+        }
+
+        client=(stn_stratum_client_session *)calloc(1u,sizeof(*client));
+        if(client==NULL){
+            log_line(server,
+                "CLIENT rejected: host memory unavailable.");
+            closesocket(socket);
+            continue;
+        }
+
+        client->socket=(uintptr_t)socket;
+        client->next=server->clients;
+        server->clients=client;
+        server->client_count++;
+
+        log_line(server,"CLIENT connected; clients=%zu.",server->client_count);
+
+        if(server->have_work){
+            (void)client_send_job(server,client);
+        }
+    }
+}
+
+static uint32_t submit_result_code(stn_rpc_client_code code)
+{
+    switch(code){
+    case STN_RPC_CLIENT_OK:return STN_MINER_RESULT_ACCEPTED;
+    case STN_RPC_CLIENT_STALE:return STN_MINER_RESULT_STALE;
+    case STN_RPC_CLIENT_REJECTED:return STN_MINER_RESULT_REJECTED;
+    default:return STN_MINER_RESULT_PROVIDER;
+    }
+}
+
+static void client_send_result(
+    stn_stratum_server *server,
+    stn_stratum_client_session *client,
+    stn_rpc_client_code rpc_code)
+{
+    uint8_t response[STN_MINER_RESULT_SIZE];
+    SOCKET socket;
+
+    if(client==NULL){return;}
+
+    socket=(SOCKET)client->socket;
+    if(socket==INVALID_SOCKET){return;}
+
+    memset(response,0,sizeof(response));
+    memcpy(response,STN_MINER_MAGIC,4);
+    response[4]=STN_MINER_VERSION;
+    response[5]=STN_MINER_RESULT;
+    write32be(response+8,submit_result_code(rpc_code));
+
+    if(!send_all(socket,response,sizeof(response))){
+        client_remove(server,client,"result send failed");
+    }
+}
+
+static void clear_client_jobs(stn_stratum_server *server)
+{
+    stn_stratum_client_session *client;
+
+    for(client=server->clients;client!=NULL;client=client->next){
+        client->has_job=0;
+        memset(client->sent_job_id,0,sizeof(client->sent_job_id));
+    }
+}
+
+static void process_submission(
+    stn_stratum_server *server,
+    stn_stratum_client_session *client)
+{
+    const uint8_t *p;
+    uint8_t *payload;
+    uint8_t response[72];
+    size_t response_length=0u;
+    uint32_t block_length;
+    uint64_t nonce;
+    stn_rpc_client_code code;
+
+    if(client==NULL){return;}
+    p=client->rx;
+
+    if(memcmp(p,STN_MINER_MAGIC,4)!=0 ||
+       p[4]!=STN_MINER_VERSION ||
+       p[5]!=STN_MINER_SUBMIT)
+    {
+        log_line(server,"CLIENT invalid submit frame.");
+        client_send_result(server,client,STN_RPC_CLIENT_INVALID);
+        return;
+    }
+
+    if(!server->have_work ||
+       memcmp(p+8,server->active_job_id,32)!=0)
+    {
+        log_line(server,"CLIENT stale job submission.");
+        client_send_result(server,client,STN_RPC_CLIENT_STALE);
+        return;
+    }
+
+    if(server->active_template_length<68u){
+        log_line(server,"ERROR active Chain template invalid during submit.");
+        client_send_result(server,client,STN_RPC_CLIENT_INVALID);
+        return;
+    }
+
+    block_length=read32be(server->active_template+64);
+
+    if((size_t)block_length!=server->active_template_length-68u ||
+       block_length<STN_MINER_CHAIN_HEADER_SIZE)
+    {
+        log_line(server,"ERROR active Chain template invalid during submit.");
+        client_send_result(server,client,STN_RPC_CLIENT_INVALID);
+        return;
+    }
+
+    payload=(uint8_t *)malloc(server->active_template_length);
+    if(payload==NULL){
+        log_line(server,
+            "ERROR submission scratch allocation failed: %zu bytes.",
+            server->active_template_length);
+        client_send_result(server,client,STN_RPC_CLIENT_PROVIDER);
+        return;
+    }
+
+    memcpy(payload,server->active_template,server->active_template_length);
+
+    nonce=read64be(p+40);
+
+    {
+        uint8_t *nonce_field=
+            payload+68u+STN_MINER_CHAIN_NONCE_OFFSET;
+        size_t i;
+        uint64_t value=nonce;
+
+        for(i=0;i<8u;i++){
+            nonce_field[7u-i]=(uint8_t)(value&0xffu);
+            value>>=8;
+        }
+    }
+
+    code=stn_rpc_client_submit_work(
+        &server->chain_rpc,
+        payload,
+        server->active_template_length,
+        response,
+        sizeof(response),
+        &response_length);
+
+    free(payload);
+
+    log_line(server,"CLIENT submit nonce=%llu Chain result=%d response=%zu.",
+        (unsigned long long)nonce,(int)code,response_length);
+
+    client_send_result(server,client,code);
+
+    if(code==STN_RPC_CLIENT_OK){
+        server->have_work=0;
+        clear_client_jobs(server);
+    }
+}
+
+static void service_client(
+    stn_stratum_server *server,
+    stn_stratum_client_session *client)
+{
+    SOCKET socket;
+
+    if(client==NULL){return;}
+
+    socket=(SOCKET)client->socket;
+    if(socket==INVALID_SOCKET){return;}
+
+    while(client->rx_used<STN_MINER_SUBMIT_SIZE){
+        int got=recv(
+            socket,
+            (char *)client->rx+client->rx_used,
+            (int)(STN_MINER_SUBMIT_SIZE-client->rx_used),
+            0);
+
+        if(got>0){
+            client->rx_used+=(size_t)got;
+            continue;
+        }
+
+        if(got==0){
+            client_remove(server,client,"peer closed");
+            return;
+        }
+
+        if(WSAGetLastError()==WSAEWOULDBLOCK){break;}
+
+        client_remove(server,client,"receive failed");
+        return;
+    }
+
+    if(client->rx_used==STN_MINER_SUBMIT_SIZE){
+        process_submission(server,client);
+
+        /*
+         * process_submission may remove the client if sending its result fails.
+         * Only touch the receive state when it is still linked.
+         */
+        {
+            stn_stratum_client_session *probe;
+            for(probe=server->clients;probe!=NULL;probe=probe->next){
+                if(probe==client){
+                    client->rx_used=0u;
+                    break;
+                }
+            }
+        }
+    }
+}
+
+static void service_clients(stn_stratum_server *server)
+{
+    stn_stratum_client_session *client=server->clients;
+
+    while(client!=NULL){
+        stn_stratum_client_session *next=client->next;
+        service_client(server,client);
+        client=next;
+    }
+}
+
+static void send_pending_jobs(stn_stratum_server *server)
+{
+    stn_stratum_client_session *client=server->clients;
+
+    while(client!=NULL){
+        stn_stratum_client_session *next=client->next;
+
+        if(server->have_work &&
+           (!client->has_job ||
+            memcmp(client->sent_job_id,server->active_job_id,32)!=0))
+        {
+            (void)client_send_job(server,client);
+        }
+
+        client=next;
+    }
+}
+
+static void clear_work(stn_stratum_server *server)
+{
+    memset(server->active_base,0,sizeof(server->active_base));
+    memset(server->active_job_id,0,sizeof(server->active_job_id));
+    server->active_template_length=0u;
+    server->have_work=0;
+    clear_client_jobs(server);
+}
+
+static void refresh_work(stn_stratum_server *server)
+{
+    uint8_t *payload=server->active_template;
+    size_t written=0u;
+    uint32_t block_length;
+    stn_rpc_client_code code;
+    int changed;
+
+    code=stn_rpc_client_mining_template(
+        &server->chain_rpc,
+        payload,
+        sizeof(server->active_template),
+        &written);
+
+    server->chain_poll_count++;
+
+    if(code!=STN_RPC_CLIENT_OK){
+        if(code==STN_RPC_CLIENT_STALE){
+            log_line(server,
+                "CHAIN work stale; invalidating current job and refreshing.");
+            server->chain_available=1;
+            clear_work(server);
+            return;
+        }
+
+        if(code==STN_RPC_CLIENT_CAPACITY){
+            log_line(server,
+                "ERROR CHAIN RPC capacity failure code=%d; "
+                "connection remains available; retrying.",
+                (int)code);
+            server->chain_available=1;
+            clear_work(server);
+            return;
+        }
+
+        if(code==STN_RPC_CLIENT_TRANSPORT ||
+           code==STN_RPC_CLIENT_UNAVAILABLE)
+        {
+            if(server->chain_available){
+                log_line(server,
+                    "CHAIN RPC connection unavailable code=%d; "
+                    "work invalidated.",
+                    (int)code);
+            }
+            else if((server->chain_poll_count%
+                     STN_STRATUM_HEARTBEAT_CHAIN_POLLS)==1u)
+            {
+                log_line(server,
+                    "CHAIN RPC connection still unavailable code=%d; "
+                    "retrying.",
+                    (int)code);
+            }
+
+            server->chain_available=0;
+            clear_work(server);
+            return;
+        }
+
+        log_line(server,
+            "ERROR CHAIN mining-template RPC rejected code=%d; retrying.",
+            (int)code);
+        server->chain_available=1;
+        clear_work(server);
+        return;
+    }
+
+    if(written<68u){
+        log_line(server,"ERROR CHAIN mining template malformed: %zu bytes.",written);
+        server->chain_available=0;
+        clear_work(server);
+        return;
+    }
+
+    block_length=read32be(payload+64);
+
+    if((size_t)block_length!=written-68u){
+        log_line(server,
+            "ERROR CHAIN template length mismatch frame=%zu block=%u.",
+            written,(unsigned)block_length);
+        server->chain_available=0;
+        clear_work(server);
+        return;
+    }
+
+    if(!server->chain_available){
+        log_line(server,"CHAIN RPC connected %s:%u.",
+            STN_STRATUM_CHAIN_HOST,(unsigned)STN_STRATUM_CHAIN_PORT);
+    }
+
+    server->chain_available=1;
+
+    changed=!server->have_work ||
+        memcmp(server->active_base,payload,32)!=0 ||
+        memcmp(server->active_job_id,payload+32,32)!=0;
+
+    server->active_template_length=written;
+
+    if(changed){
+        char base[17];
+        char job[17];
+
+        memcpy(server->active_base,payload,32);
+        memcpy(server->active_job_id,payload+32,32);
+        server->have_work=1;
+
+        hex8(base,server->active_base);
+        hex8(job,server->active_job_id);
+
+        log_line(server,
+            "WORK new base=%s... job=%s... block=%u bytes.",
+            base,job,(unsigned)block_length);
+
+        send_pending_jobs(server);
+        return;
+    }
+
+    if((server->chain_poll_count%STN_STRATUM_HEARTBEAT_CHAIN_POLLS)==0u){
+        char base[17];
+        char job[17];
+
+        hex8(base,server->active_base);
+        hex8(job,server->active_job_id);
+
+        log_line(server,
+            "HEARTBEAT running chain=connected work=active clients=%zu "
+            "base=%s... job=%s....",
+            server->client_count,
+            base,
+            job);
+    }
+}
+
+void stn_stratum_server_init(stn_stratum_server *server)
+{
+    if(server==NULL){return;}
+
+    memset(server,0,sizeof(*server));
+    server->listen_socket=STN_INVALID_SOCKET_VALUE;
+    server->running=1;
+
+    stn_rpc_win32_init(
+        &server->chain_transport,
+        STN_STRATUM_CHAIN_HOST,
+        STN_STRATUM_CHAIN_PORT);
+
+    stn_rpc_client_init(
+        &server->chain_rpc,
+        &server->chain_transport,
+        stn_rpc_win32_exchange);
+}
+
+int stn_stratum_server_run(stn_stratum_server *server)
+{
+    if(server==NULL){return 0;}
+
+    if(!log_open(server)){
+        fprintf(stderr,"Unable to open local log: %s\n",STN_STRATUM_LOG_PATH);
+        return 0;
+    }
+
+    log_line(server,"START STN-Stratum development server.");
+    log_line(server,"LOG %s.",STN_STRATUM_LOG_PATH);
+    log_line(server,"CHAIN target %s:%u.",
+        STN_STRATUM_CHAIN_HOST,(unsigned)STN_STRATUM_CHAIN_PORT);
+
+    if(!listener_open(server)){
+        log_line(server,"STOP startup failed.");
+        return 0;
+    }
+
+    while(server->running){
+        accept_clients(server);
+        service_clients(server);
+
+        if((server->loop_count%STN_STRATUM_CHAIN_POLL_TICKS)==0u){
+            refresh_work(server);
+        }
+
+        send_pending_jobs(server);
+
+        server->loop_count++;
+        Sleep(STN_STRATUM_POLL_MS);
+    }
+
+    log_line(server,"STOP requested.");
+    return 1;
+}
+
+void stn_stratum_server_stop(stn_stratum_server *server)
+{
+    if(server!=NULL){server->running=0;}
+}
+
+void stn_stratum_server_close(stn_stratum_server *server)
+{
+    if(server==NULL){return;}
+
+    while(server->clients!=NULL){
+        client_remove(server,server->clients,NULL);
+    }
+
+    listener_close(server);
+    stn_rpc_win32_close(&server->chain_transport);
+    winsock_close(server);
+
+    clear_work(server);
+    server->chain_available=0;
+
+    log_line(server,"STOP complete.");
+    log_close(server);
+}
+
+#else
+
+void stn_stratum_server_init(stn_stratum_server *server){(void)server;}
+int stn_stratum_server_run(stn_stratum_server *server){(void)server;return 0;}
+void stn_stratum_server_stop(stn_stratum_server *server){(void)server;}
+void stn_stratum_server_close(stn_stratum_server *server){(void)server;}
+
+#endif
