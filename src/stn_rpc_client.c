@@ -104,7 +104,7 @@ static stn_rpc_client_code call(
         goto done;
     }
 
-    if(frame_length<24u||
+    if(frame_length<24u||frame_length>response_frame_capacity||
        memcmp(response,"STNC",4)!=0||
        read_be(response+4,2)!=STN_RPC_CLIENT_VERSION||
        read_be(response+6,2)!=2u||
@@ -139,6 +139,14 @@ static stn_rpc_client_code call(
         goto done;
     }
 
+    if((method==STN_RPC_CLIENT_INFO && response_length!=176u) ||
+       (method==STN_RPC_CLIENT_SUBMIT_WORK && response_length!=72u) ||
+       (method==STN_RPC_CLIENT_MINING_TEMPLATE &&
+        (response_length<432u || read_be(response+24+64,4)!=response_length-68u ||
+         memcmp(response+24+68,"STNB",4)!=0 || read_be(response+24+72,2)!=3u))){
+        result=STN_RPC_CLIENT_INVALID;goto done;
+    }
+
     if(response_length!=0u){
         memcpy(response_payload,response+24,response_length);
     }
@@ -162,6 +170,12 @@ void stn_rpc_client_init(
         client->exchange=exchange;
         client->next_request_id=1u;
     }
+}
+
+stn_rpc_client_code stn_rpc_client_info(stn_rpc_client *client,
+    uint8_t *payload,size_t capacity,size_t *written)
+{
+    return call(client,STN_RPC_CLIENT_INFO,NULL,0,payload,capacity,written);
 }
 
 stn_rpc_client_code stn_rpc_client_mining_template(

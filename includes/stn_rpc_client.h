@@ -7,10 +7,11 @@
 
 #define STN_RPC_CLIENT_HEADER_SIZE 24u
 #define STN_RPC_CLIENT_VERSION 1u
-#define STN_RPC_CLIENT_MAX_PAYLOAD (68u + 1048576u)
+#define STN_RPC_CLIENT_MAX_PAYLOAD 1051948u
 #define STN_RPC_CLIENT_MAX_FRAME (STN_RPC_CLIENT_HEADER_SIZE + STN_RPC_CLIENT_MAX_PAYLOAD)
 
 #define STN_RPC_CLIENT_MINING_TEMPLATE 0x2002u
+#define STN_RPC_CLIENT_INFO 0x0001u
 #define STN_RPC_CLIENT_SUBMIT_WORK     0x2003u
 
 typedef enum stn_rpc_client_code {
@@ -46,6 +47,10 @@ void stn_rpc_client_init(
     stn_rpc_client *client,
     void *transport_user,
     stn_rpc_client_exchange_fn exchange);
+
+/* Exact 176-byte STNC v1 INFO payload, decoded by the caller as big-endian. */
+stn_rpc_client_code stn_rpc_client_info(stn_rpc_client *client,
+    uint8_t *payload,size_t capacity,size_t *written);
 
 stn_rpc_client_code stn_rpc_client_mining_template(
     stn_rpc_client *client,

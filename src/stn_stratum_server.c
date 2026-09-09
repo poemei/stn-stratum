@@ -370,6 +370,7 @@ static uint32_t submit_result_code(stn_rpc_client_code code)
     case STN_RPC_CLIENT_OK:return STN_MINER_RESULT_ACCEPTED;
     case STN_RPC_CLIENT_STALE:return STN_MINER_RESULT_STALE;
     case STN_RPC_CLIENT_REJECTED:return STN_MINER_RESULT_REJECTED;
+    case STN_RPC_CLIENT_INVALID:case STN_RPC_CLIENT_VERSION_ERROR:return STN_MINER_RESULT_PROTOCOL;
     default:return STN_MINER_RESULT_PROVIDER;
     }
 }
@@ -425,7 +426,7 @@ static void process_submission(
 
     if(memcmp(p,STN_MINER_MAGIC,4)!=0 ||
        p[4]!=STN_MINER_VERSION ||
-       p[5]!=STN_MINER_SUBMIT)
+       p[5]!=STN_MINER_SUBMIT || p[6]!=0 || p[7]!=0)
     {
         log_line(server,"CLIENT invalid submit frame.");
         client_send_result(server,client,STN_RPC_CLIENT_INVALID);
@@ -496,7 +497,11 @@ static void process_submission(
 
     client_send_result(server,client,code);
 
-    if(code==STN_RPC_CLIENT_OK){
+    if(code==STN_RPC_CLIENT_OK || code==STN_RPC_CLIENT_STALE ||
+       code==STN_RPC_CLIENT_TRANSPORT || code==STN_RPC_CLIENT_UNAVAILABLE ||
+       code==STN_RPC_CLIENT_PROVIDER || code==STN_RPC_CLIENT_INVALID){
+        /* A failed/uncertain Chain boundary cannot leave cached work current
+         * until the next poll. REJECTED nonce results do not invalidate work. */
         server->have_work=0;
         clear_client_jobs(server);
     }

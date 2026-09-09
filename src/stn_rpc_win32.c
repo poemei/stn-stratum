@@ -80,6 +80,11 @@ static int connect_socket(stn_rpc_win32 *t)
     freeaddrinfo(result);
 
     if(s==INVALID_SOCKET){return 0;}
+    {
+        DWORD timeout=5000;
+        if(setsockopt(s,SOL_SOCKET,SO_RCVTIMEO,(const char *)&timeout,sizeof(timeout))!=0 ||
+           setsockopt(s,SOL_SOCKET,SO_SNDTIMEO,(const char *)&timeout,sizeof(timeout))!=0){closesocket(s);return 0;}
+    }
     t->socket_handle=(uintptr_t)s;
     return 1;
 }
@@ -187,7 +192,10 @@ int stn_rpc_win32_exchange(
         return 1;
     }
 
-    /* One deterministic reconnect/retry for a dropped Chain connection. */
+    /* Only repeat read operations. A lost mutation response has an unknown
+     * outcome; retransmitting may misleadingly turn acceptance into STALE. */
+    if(request_length<24u || !((request[8]==0 && request[9]==1) ||
+       (request[8]==0x20 && request[9]==2))){return 0;}
     return exchange_once(
         t,request,request_length,response,response_capacity,response_length);
 }
