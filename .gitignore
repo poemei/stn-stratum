@@ -1,6 +1,56 @@
+# Build output (root architecture folders only; platforms/ stays trackable)
 /build/
-/.vs/
+/bin/
+/obj/
+/x86/
+/x64/
+/ARM/
+/ARM64/
+[Dd]ebug/
+[Rr]elease/
+
+# Test output
+/tests/
+
+# Visual Studio per-user state and caches
+.vs/
+*.suo
 *.user
+*.userosscache
+*.sln.docstates
+*.VC.db
+*.VC.db-shm
+*.VC.db-wal
+*.VC.opendb
+*.sdf
+*.opensdf
+ipch/
 *.sln
 *.vcxproj
-*.vcxproj.user
+*.filters
+
+# Command tools
+*.cmd
+
+# Windows compiler, linker, resource, and analysis output
+*.obj
+*.exe
+*.dll
+*.lib
+*.exp
+*.ilk
+*.pdb
+*.idb
+*.pch
+*.ipdb
+*.iobj
+*.res
+*.tlog
+*.lastbuildstate
+*.VC.db*
+*.recipe
+*.nativecodeanalysis.xml
+
+# Windows Explorer metadata
+Thumbs.db
+Desktop.ini
