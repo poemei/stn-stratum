@@ -415,7 +415,7 @@ static void process_submission(
 {
     const uint8_t *p;
     uint8_t *payload;
-    uint8_t response[72];
+    uint8_t response[80];
     size_t response_length=0u;
     uint32_t block_length;
     uint64_t nonce;

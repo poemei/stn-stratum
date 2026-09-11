@@ -73,3 +73,12 @@ All 562 Phase 10 process checks (81/93/115/148/125), 1,544 Phase 9 checks,
 probes pass. Release/x64 builds have zero warnings/errors. Identity and result
 fixtures remain test-only; hardware, production identity, accounting, performance
 and other platforms are not qualified. Phase 11 has not started.
+
+## Chain cumulative-work update — Phase 11 Chunk 3 (2026-09-10)
+
+The Chain client requires STNC v2. INFO is 184 bytes with 40-byte big-endian
+cumulative work at offset 104; accepted SUBMIT_WORK responses are 80 bytes with
+40-byte work at offset 40. The live server and historical adapter allocate and
+validate the full response. Version 1 and invalid response lengths fail closed. STNM jobs,
+32-byte targets/work IDs and 64-bit nonce mapping are unchanged. Rebuild both
+Chain and Stratum for protocol interoperability; no automatic v1 fallback exists.

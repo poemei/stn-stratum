@@ -139,8 +139,8 @@ static stn_rpc_client_code call(
         goto done;
     }
 
-    if((method==STN_RPC_CLIENT_INFO && response_length!=176u) ||
-       (method==STN_RPC_CLIENT_SUBMIT_WORK && response_length!=72u) ||
+    if((method==STN_RPC_CLIENT_INFO && response_length!=184u) ||
+       (method==STN_RPC_CLIENT_SUBMIT_WORK && response_length!=80u) ||
        (method==STN_RPC_CLIENT_MINING_TEMPLATE &&
         (response_length<432u || read_be(response+24+64,4)!=response_length-68u ||
          memcmp(response+24+68,"STNB",4)!=0 || read_be(response+24+72,2)!=3u))){

@@ -128,7 +128,7 @@ static stn_stratum_status rpc_submit(
 {
     stn_chain_rpc_adapter *a=(stn_chain_rpc_adapter *)user;
     uint8_t payload[STN_RPC_CLIENT_MAX_PAYLOAD];
-    uint8_t response[72];
+    uint8_t response[80];
     size_t n=0u;
     stn_rpc_client_code code;
 
@@ -164,7 +164,7 @@ static stn_stratum_status rpc_submit(
     if(code!=STN_RPC_CLIENT_OK){
         return map_rpc(code);
     }
-    if(n!=72u){
+    if(n!=80u){
         return STN_STRATUM_STRUCTURE;
     }
 

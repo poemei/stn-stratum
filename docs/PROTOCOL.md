@@ -9,7 +9,7 @@ available through the same client API; the server's work polling does not depend
 on INFO. The standalone adapter/session prototype below is not the live server
 composition and was not expanded in this qualification.
 
-STNC v1 uses a 24-byte big-endian header: magic[4], version u16=1, kind u16,
+STNC v2 uses a 24-byte big-endian header: magic[4], version u16=2, kind u16,
 opcode u16, result u16, request ID u64, payload length u32. Requests have kind 1
 and result 0; responses have kind 2 and must echo the opcode/request ID. The
 client validates framing, correlation and successful method lengths. Maximum
@@ -17,9 +17,9 @@ payload is 1,051,948 bytes, matching current Chain rather than the old 1 MiB bou
 
 | Operation | Request | Successful response |
 | --- | --- | --- |
-| 0x0001 INFO | empty | 176 bytes: network[32], genesis[32], height u64, tip[32], work[32], target[32], status u32, block count u32 |
+| 0x0001 INFO | empty | 184 bytes: network[32], genesis[32], height u64, tip[32], work[40], target[32], status u32, block count u32 |
 | 0x2002 MINING_TEMPLATE | empty | base[32], work ID[32], block length u32, canonical v3 block |
-| 0x2003 SUBMIT_WORK | complete template payload with only block nonce changed | block ID[32], accepted height u64, cumulative work[32] (72 bytes) |
+| 0x2003 SUBMIT_WORK | complete template payload with only block nonce changed | block ID[32], accepted height u64, cumulative work[40] (80 bytes) |
 
 Template fields inside the block include height at 72, target at 120, and the
 big-endian 64-bit nonce at 152..159. The complete block starts at payload offset
@@ -181,3 +181,12 @@ All 562 Phase 10 process checks (81/93/115/148/125), 1,544 Phase 9 checks,
 probes pass. Release/x64 builds have zero warnings/errors. Identity and result
 fixtures remain test-only; hardware, production identity, accounting, performance
 and other platforms are not qualified. Phase 11 has not started.
+
+## Chain cumulative-work update — Phase 11 Chunk 3 (2026-09-10)
+
+The Chain client now requires STNC v2. INFO is 184 bytes with 40-byte big-endian
+cumulative work at offset 104; accepted SUBMIT_WORK responses are 80 bytes with
+40-byte work at offset 40. The live server and historical adapter allocate the
+full response. Version 1 and invalid response lengths fail closed. STNM jobs,
+32-byte targets/work IDs and 64-bit nonce mapping are unchanged. Rebuild both
+Chain and Stratum for protocol interoperability; no automatic v1 fallback exists.

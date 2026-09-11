@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 #define STN_RPC_CLIENT_HEADER_SIZE 24u
-#define STN_RPC_CLIENT_VERSION 1u
+#define STN_RPC_CLIENT_VERSION 2u
 #define STN_RPC_CLIENT_MAX_PAYLOAD 1051948u
 #define STN_RPC_CLIENT_MAX_FRAME (STN_RPC_CLIENT_HEADER_SIZE + STN_RPC_CLIENT_MAX_PAYLOAD)
 
@@ -48,7 +48,7 @@ void stn_rpc_client_init(
     void *transport_user,
     stn_rpc_client_exchange_fn exchange);
 
-/* Exact 176-byte STNC v1 INFO payload, decoded by the caller as big-endian. */
+/* Exact 184-byte STNC v2 INFO payload, including 40-byte big-endian work. */
 stn_rpc_client_code stn_rpc_client_info(stn_rpc_client *client,
     uint8_t *payload,size_t capacity,size_t *written);
 

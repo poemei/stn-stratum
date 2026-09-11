@@ -10,12 +10,12 @@ static void put(uint8_t *p,size_t n,uint64_t v){while(n){p[--n]=(uint8_t)v;v>>=8
 static int fault;
 static int mock(void *u,const uint8_t *q,size_t qn,uint8_t *r,size_t cap,size_t *rn)
 {
-    size_t n=176;(void)u;(void)qn;
-    if(cap<200){return 0;}memcpy(r,q,24);r[7]=2;memset(r+24,0,n);
+    size_t n=184;(void)u;(void)qn;
+    if(cap<208){return 0;}memcpy(r,q,24);r[7]=2;memset(r+24,0,n);
     if(fault>=10){n=0;r[11]=(uint8_t)(fault-10);}
     put(r+20,4,n);*rn=24+n;
     if(fault>=22){
-        n=fault>=26 ? (fault==26 ? 71u : 72u) : 432u;
+        n=fault>=26 ? (fault==26 ? 79u : 80u) : 432u;
         memset(r+24,0,n);r[11]=0;put(r+20,4,n);*rn=24+n;
         if(fault<26){put(r+24+64,4,364);memcpy(r+24+68,"STNB",4);r[24+73]=3;
             if(fault==22){put(r+20,4,431);*rn=455;}
@@ -23,7 +23,7 @@ static int mock(void *u,const uint8_t *q,size_t qn,uint8_t *r,size_t cap,size_t 
             if(fault==24){r[24+73]=2;}}
         return 1;
     }
-    switch(fault){case 1:r[0]=0;break;case 2:r[5]=2;break;case 3:r[7]=1;break;
+    switch(fault){case 1:r[0]=0;break;case 2:r[5]=1;break;case 3:r[7]=1;break;
     case 4:r[9]^=1;break;case 5:r[19]^=1;break;case 6:*rn=23;break;
     case 7:put(r+20,4,175);*rn=199;break;case 8:*rn=cap+1;break;
     case 9:r[11]=7;break;default:break;}return 1;
@@ -34,7 +34,7 @@ static int selftest(void)
     stn_rpc_client_init(&c,NULL,mock);
     for(i=0;i<=20;i++){
         fault=i;code=stn_rpc_client_info(&c,reply,sizeof(reply),&n);
-        if(i==0){if(code!=STN_RPC_CLIENT_OK || n!=176){++fail;}}
+        if(i==0){if(code!=STN_RPC_CLIENT_OK || n!=184){++fail;}}
         else if(i<10 || i==10){if(code!=STN_RPC_CLIENT_INVALID || n!=0){++fail;}}
         else if(code!=(stn_rpc_client_code)(i-10) || n!=0){++fail;}
     }
@@ -67,7 +67,7 @@ int main(int argc,char **argv)
             code=stn_rpc_client_submit_work(&client,work,work_length,reply,sizeof(reply),&n);
         }else if(strncmp(command,"unknown",7)==0){
             uint8_t q[24]={0};size_t rn;
-            memcpy(q,"STNC",4);q[5]=1;q[7]=1;q[8]=0x77;q[9]=0x77;q[19]=123;
+            memcpy(q,"STNC",4);q[5]=STN_RPC_CLIENT_VERSION;q[7]=1;q[8]=0x77;q[9]=0x77;q[19]=123;
             if(stn_rpc_win32_exchange(&transport,q,24,reply,sizeof(reply),&rn) && rn==24){code=(stn_rpc_client_code)reply[11];}
             else{code=STN_RPC_CLIENT_TRANSPORT;}
         }

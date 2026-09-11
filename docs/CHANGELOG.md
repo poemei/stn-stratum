@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+### STNC v2 RPC compatibility — 2026-09-10
+
+- Updated the Stratum client and live server for Chain STNC v2: version 2
+  framing, 184-byte INFO responses, and 80-byte accepted-work responses with
+  40-byte cumulative work.
+- Corrected the historical Chain adapter's accepted-response length check to
+  require the v2 80-byte result. No v1 fallback or consensus behavior was added.
+- Rebuilt the Windows x64 targets with zero warnings/errors. Parser and session
+  tests pass. Full cross-process integration could not run because Chain RPC
+  port 18473 was already occupied by an existing process.
+
+### Phase 11 Chunk 3 — 320-bit work/domain consistency — 2026-09-10
+
+- Implemented the owner's authorized unsigned 320-bit cumulative-work rule:
+  exact 40-byte big-endian addition, reconstruction and comparison. Targets remain
+  1..2^255-1. Maximum work for 2^64 blocks is 2^319, which fits without an artificial
+  ceiling. Target-one successors no longer fail at the former 256-bit boundary.
+- Versioned affected transports explicitly: STNC v2 INFO=184 bytes, accepted
+  solved-work=80 bytes; STNP v2 STATE=84 payload bytes. Widened only cumulative
+  work and shifted following fields. Old versions/wrong lengths fail closed.
+  Canonical block storage contains no work cache and needs no format change.
+- Added 220 domain/history checks and three reorg/reload checks: 223 new C checks.
+  Cover minimum/adjacent targets, maximum height, exact carry/order, 320-bit API
+  overflow atomicity, 61 minimum-target blocks, storage reconstruction, high-work
+  STNC/P2P transport, invalid lengths and strict legacy-history TARGET failure.
+- All 1,132,168 Chain C checks, 34 probes, 1,544 Phase 9, 562 Phase 10 and 834
+  adjusted-target process checks pass. Stratum's 27 parser checks and two session
+  assertions pass. Windows Release/x64 builds have zero warnings/errors/failures.
+- Corrected transport capacities/offsets, old-width assertions and handcrafted
+  v1 fixture requests. Updated the Stratum client, response buffers and its docs;
+  STNM, target, nonce and work-ID semantics are unchanged. Legacy fixed-target
+  development evidence receives current-rule validation, with no rewriting,
+  migration, exception or claim that historical incompatibility is corruption.
+- Updated roadmap, decisions, consensus/protocol architecture, build instructions
+  and both changelogs. Scripted minimum-target hashes are qualification fixtures,
+  not hardware/production identity evidence. No commit or push. Chunk 4 not started.
+
+
 ### Phase 10 Chunk 5 — full integration COMPLETE — 2026-09-09
 
 - Added 125 actual-process checks (-FullLifecycleOnly) covering Chain template,
