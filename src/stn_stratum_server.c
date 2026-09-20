@@ -8,10 +8,14 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
+#include <fcntl.h>
+#include <io.h>
+#include <share.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 
 #pragma comment(lib,"Ws2_32.lib")
@@ -94,16 +98,31 @@ static void log_line(stn_stratum_server *server,const char *format,...)
 
 static int log_open(stn_stratum_server *server)
 {
+    int descriptor=-1;
+    FILE *file=NULL;
+
     if(!CreateDirectoryA("logs",NULL)){
         DWORD e=GetLastError();
         if(e!=ERROR_ALREADY_EXISTS){return 0;}
     }
 
-    if(fopen_s(&server->log_file,STN_STRATUM_LOG_PATH,"a")!=0){
-        server->log_file=NULL;
+    if(_sopen_s(
+        &descriptor,
+        STN_STRATUM_LOG_PATH,
+        _O_WRONLY|_O_CREAT|_O_APPEND|_O_BINARY,
+        _SH_DENYNO,
+        _S_IREAD|_S_IWRITE)!=0)
+    {
         return 0;
     }
 
+    file=_fdopen(descriptor,"ab");
+    if(file==NULL){
+        _close(descriptor);
+        return 0;
+    }
+
+    server->log_file=file;
     return 1;
 }
 
@@ -370,8 +389,11 @@ static uint32_t submit_result_code(stn_rpc_client_code code)
     case STN_RPC_CLIENT_OK:return STN_MINER_RESULT_ACCEPTED;
     case STN_RPC_CLIENT_STALE:return STN_MINER_RESULT_STALE;
     case STN_RPC_CLIENT_REJECTED:return STN_MINER_RESULT_REJECTED;
-    case STN_RPC_CLIENT_INVALID:case STN_RPC_CLIENT_VERSION_ERROR:return STN_MINER_RESULT_PROTOCOL;
-    default:return STN_MINER_RESULT_PROVIDER;
+    case STN_RPC_CLIENT_INVALID:
+    case STN_RPC_CLIENT_VERSION_ERROR:
+        return STN_MINER_RESULT_PROTOCOL;
+    default:
+        return STN_MINER_RESULT_PROVIDER;
     }
 }
 
@@ -407,6 +429,86 @@ static void clear_client_jobs(stn_stratum_server *server)
         client->has_job=0;
         memset(client->sent_job_id,0,sizeof(client->sent_job_id));
     }
+}
+
+static void clear_work(stn_stratum_server *server)
+{
+    memset(server->active_base,0,sizeof(server->active_base));
+    memset(server->active_job_id,0,sizeof(server->active_job_id));
+    server->active_template_length=0u;
+    server->have_work=0;
+    clear_client_jobs(server);
+}
+
+static stn_chain_config_entry *active_chain(
+    stn_stratum_server *server)
+{
+    if(server==NULL ||
+       server->chain_config.server_count==0u ||
+       server->active_chain_server>=server->chain_config.server_count)
+    {
+        return NULL;
+    }
+
+    return &server->chain_config.servers[server->active_chain_server];
+}
+
+static int chain_transport_select(
+    stn_stratum_server *server,
+    size_t index)
+{
+    stn_chain_config_entry *entry;
+
+    if(server==NULL ||
+       index>=server->chain_config.server_count)
+    {
+        return 0;
+    }
+
+    clear_work(server);
+    server->chain_available=0;
+
+    stn_rpc_win32_close(&server->chain_transport);
+
+    server->active_chain_server=index;
+    entry=&server->chain_config.servers[index];
+
+    stn_rpc_win32_init(
+        &server->chain_transport,
+        entry->host,
+        entry->port);
+
+    stn_rpc_client_init(
+        &server->chain_rpc,
+        &server->chain_transport,
+        stn_rpc_win32_exchange);
+
+    log_line(server,
+        "CHAIN target %s:%u.",
+        entry->host,
+        (unsigned)entry->port);
+
+    return 1;
+}
+
+static int chain_transport_next(
+    stn_stratum_server *server)
+{
+    size_t next;
+
+    if(server==NULL ||
+       server->chain_config.server_count==0u)
+    {
+        return 0;
+    }
+
+    next=server->active_chain_server+1u;
+
+    if(next>=server->chain_config.server_count){
+        next=0u;
+    }
+
+    return chain_transport_select(server,next);
 }
 
 static void process_submission(
@@ -497,13 +599,24 @@ static void process_submission(
 
     client_send_result(server,client,code);
 
-    if(code==STN_RPC_CLIENT_OK || code==STN_RPC_CLIENT_STALE ||
-       code==STN_RPC_CLIENT_TRANSPORT || code==STN_RPC_CLIENT_UNAVAILABLE ||
-       code==STN_RPC_CLIENT_PROVIDER || code==STN_RPC_CLIENT_INVALID){
-        /* A failed/uncertain Chain boundary cannot leave cached work current
-         * until the next poll. REJECTED nonce results do not invalidate work. */
-        server->have_work=0;
-        clear_client_jobs(server);
+    if(code==STN_RPC_CLIENT_OK ||
+       code==STN_RPC_CLIENT_STALE ||
+       code==STN_RPC_CLIENT_TRANSPORT ||
+       code==STN_RPC_CLIENT_UNAVAILABLE ||
+       code==STN_RPC_CLIENT_PROVIDER ||
+       code==STN_RPC_CLIENT_INVALID)
+    {
+        clear_work(server);
+    }
+
+    if(code==STN_RPC_CLIENT_TRANSPORT ||
+       code==STN_RPC_CLIENT_UNAVAILABLE)
+    {
+        log_line(server,
+            "CHAIN RPC endpoint unavailable after submission; "
+            "selecting next configured server.");
+
+        (void)chain_transport_next(server);
     }
 }
 
@@ -544,12 +657,9 @@ static void service_client(
     if(client->rx_used==STN_MINER_SUBMIT_SIZE){
         process_submission(server,client);
 
-        /*
-         * process_submission may remove the client if sending its result fails.
-         * Only touch the receive state when it is still linked.
-         */
         {
             stn_stratum_client_session *probe;
+
             for(probe=server->clients;probe!=NULL;probe=probe->next){
                 if(probe==client){
                     client->rx_used=0u;
@@ -589,21 +699,13 @@ static void send_pending_jobs(stn_stratum_server *server)
     }
 }
 
-static void clear_work(stn_stratum_server *server)
-{
-    memset(server->active_base,0,sizeof(server->active_base));
-    memset(server->active_job_id,0,sizeof(server->active_job_id));
-    server->active_template_length=0u;
-    server->have_work=0;
-    clear_client_jobs(server);
-}
-
 static void refresh_work(stn_stratum_server *server)
 {
     uint8_t *payload=server->active_template;
     size_t written=0u;
     uint32_t block_length;
     stn_rpc_client_code code;
+    stn_chain_config_entry *entry;
     int changed;
 
     code=stn_rpc_client_mining_template(
@@ -647,12 +749,13 @@ static void refresh_work(stn_stratum_server *server)
             {
                 log_line(server,
                     "CHAIN RPC connection still unavailable code=%d; "
-                    "retrying.",
+                    "selecting next configured server.",
                     (int)code);
             }
 
             server->chain_available=0;
             clear_work(server);
+            (void)chain_transport_next(server);
             return;
         }
 
@@ -665,7 +768,9 @@ static void refresh_work(stn_stratum_server *server)
     }
 
     if(written<68u){
-        log_line(server,"ERROR CHAIN mining template malformed: %zu bytes.",written);
+        log_line(server,
+            "ERROR CHAIN mining template malformed: %zu bytes.",
+            written);
         server->chain_available=0;
         clear_work(server);
         return;
@@ -676,15 +781,22 @@ static void refresh_work(stn_stratum_server *server)
     if((size_t)block_length!=written-68u){
         log_line(server,
             "ERROR CHAIN template length mismatch frame=%zu block=%u.",
-            written,(unsigned)block_length);
+            written,
+            (unsigned)block_length);
         server->chain_available=0;
         clear_work(server);
         return;
     }
 
     if(!server->chain_available){
-        log_line(server,"CHAIN RPC connected %s:%u.",
-            STN_STRATUM_CHAIN_HOST,(unsigned)STN_STRATUM_CHAIN_PORT);
+        entry=active_chain(server);
+
+        if(entry!=NULL){
+            log_line(server,
+                "CHAIN RPC connected %s:%u.",
+                entry->host,
+                (unsigned)entry->port);
+        }
     }
 
     server->chain_available=1;
@@ -708,13 +820,17 @@ static void refresh_work(stn_stratum_server *server)
 
         log_line(server,
             "WORK new base=%s... job=%s... block=%u bytes.",
-            base,job,(unsigned)block_length);
+            base,
+            job,
+            (unsigned)block_length);
 
         send_pending_jobs(server);
         return;
     }
 
-    if((server->chain_poll_count%STN_STRATUM_HEARTBEAT_CHAIN_POLLS)==0u){
+    if((server->chain_poll_count%
+        STN_STRATUM_HEARTBEAT_CHAIN_POLLS)==0u)
+    {
         char base[17];
         char job[17];
 
@@ -737,31 +853,64 @@ void stn_stratum_server_init(stn_stratum_server *server)
     memset(server,0,sizeof(*server));
     server->listen_socket=STN_INVALID_SOCKET_VALUE;
     server->running=1;
-
-    stn_rpc_win32_init(
-        &server->chain_transport,
-        STN_STRATUM_CHAIN_HOST,
-        STN_STRATUM_CHAIN_PORT);
-
-    stn_rpc_client_init(
-        &server->chain_rpc,
-        &server->chain_transport,
-        stn_rpc_win32_exchange);
 }
 
 int stn_stratum_server_run(stn_stratum_server *server)
 {
+    stn_chain_config_entry *entry;
+
     if(server==NULL){return 0;}
 
     if(!log_open(server)){
-        fprintf(stderr,"Unable to open local log: %s\n",STN_STRATUM_LOG_PATH);
+        fprintf(stderr,
+            "Unable to open local log: %s\n",
+            STN_STRATUM_LOG_PATH);
         return 0;
     }
 
     log_line(server,"START STN-Stratum development server.");
     log_line(server,"LOG %s.",STN_STRATUM_LOG_PATH);
-    log_line(server,"CHAIN target %s:%u.",
-        STN_STRATUM_CHAIN_HOST,(unsigned)STN_STRATUM_CHAIN_PORT);
+    log_line(server,"CHAIN config %s.",STN_STRATUM_CHAIN_CONFIG);
+
+    if(!stn_chain_config_load(
+        &server->chain_config,
+        STN_STRATUM_CHAIN_CONFIG))
+    {
+        log_line(server,
+            "ERROR unable to load Chain configuration: %s.",
+            STN_STRATUM_CHAIN_CONFIG);
+        log_line(server,"STOP startup failed.");
+        return 0;
+    }
+
+    if(server->chain_config.server_count==0u){
+        log_line(server,
+            "ERROR Chain configuration contains no servers.");
+        log_line(server,"STOP startup failed.");
+        return 0;
+    }
+
+    server->active_chain_server=0u;
+
+    if(!chain_transport_select(server,0u)){
+        log_line(server,
+            "ERROR unable to select configured Chain server.");
+        log_line(server,"STOP startup failed.");
+        return 0;
+    }
+
+    entry=active_chain(server);
+
+    if(entry==NULL){
+        log_line(server,
+            "ERROR configured Chain server unavailable.");
+        log_line(server,"STOP startup failed.");
+        return 0;
+    }
+
+    log_line(server,
+        "CHAIN servers loaded=%zu.",
+        server->chain_config.server_count);
 
     if(!listener_open(server)){
         log_line(server,"STOP startup failed.");
@@ -772,7 +921,9 @@ int stn_stratum_server_run(stn_stratum_server *server)
         accept_clients(server);
         service_clients(server);
 
-        if((server->loop_count%STN_STRATUM_CHAIN_POLL_TICKS)==0u){
+        if((server->loop_count%
+            STN_STRATUM_CHAIN_POLL_TICKS)==0u)
+        {
             refresh_work(server);
         }
 
@@ -805,6 +956,8 @@ void stn_stratum_server_close(stn_stratum_server *server)
 
     clear_work(server);
     server->chain_available=0;
+
+    stn_chain_config_close(&server->chain_config);
 
     log_line(server,"STOP complete.");
     log_close(server);

@@ -9,10 +9,10 @@
 #include "stn_rpc_client.h"
 #include "stn_rpc_win32.h"
 #include "stn_miner_protocol.h"
+#include "stn_chain_config.h"
 
 #define STN_STRATUM_DEFAULT_PORT 18475u
-#define STN_STRATUM_CHAIN_HOST "127.0.0.1"
-#define STN_STRATUM_CHAIN_PORT 18473u
+#define STN_STRATUM_CHAIN_CONFIG "config/chains.json"
 #define STN_STRATUM_POLL_MS 250u
 #define STN_STRATUM_CHAIN_POLL_TICKS 4u
 #define STN_STRATUM_LOG_PATH "logs\\stn-stratum.log"
@@ -21,6 +21,9 @@
 typedef struct stn_stratum_client_session stn_stratum_client_session;
 
 typedef struct stn_stratum_server {
+    stn_chain_config chain_config;
+    size_t active_chain_server;
+
     stn_rpc_win32 chain_transport;
     stn_rpc_client chain_rpc;
 
