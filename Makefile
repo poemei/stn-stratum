@@ -81,7 +81,7 @@ install: build
 
 	install -d "$(DESTDIR)$(BINDIR)"
 	install -d "$(DESTDIR)$(CONFIGDIR)"
-	install -d "$(DESTDIR)$(LOGDIR)"
+	install -d -o stnchain -g stnchain -m 0755 "$(DESTDIR)$(LOGDIR)"
 
 	install -m 0755 "$(TARGET)" \
 		"$(DESTDIR)$(BINDIR)/stn-stratum"
@@ -90,6 +90,7 @@ install: build
 		"$(DESTDIR)$(CONFIG_TARGET)"
 
 	touch "$(DESTDIR)$(LOG_TARGET)"
+	chown stnchain:stnchain "$(DESTDIR)$(LOG_TARGET)"
 	chmod 0644 "$(DESTDIR)$(LOG_TARGET)"
 
 	@echo "Installed:"
