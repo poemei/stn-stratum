@@ -21,7 +21,7 @@ BINDIR  ?= $(PREFIX)/bin
 BUILD_DIR := build
 TARGET    := $(BUILD_DIR)/stn-chain
 
-CPPFLAGS := -Iincludes -Iplatforms
+CPPFLAGS := -D_POSIX_C_SOURCE=200809L -Iincludes -Iplatforms
 CFLAGS   := -std=c17 -Wall -Wextra -Wpedantic -Werror -O2
 
 COMMON_SOURCES := \
