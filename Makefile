@@ -18,8 +18,15 @@ CC      ?= gcc
 PREFIX  ?= /usr/local
 BINDIR  ?= $(PREFIX)/bin
 
+CONFIGDIR ?= /etc/stn-stratum
+LOGDIR    ?= /var/log/stratum
+
 BUILD_DIR := build
 TARGET    := $(BUILD_DIR)/stn-stratum
+
+CONFIG_SOURCE := config/chains.json
+CONFIG_TARGET := $(CONFIGDIR)/config.json
+LOG_TARGET    := $(LOGDIR)/stratum.log
 
 CPPFLAGS := -D_POSIX_C_SOURCE=200809L -Iincludes -Iplatforms
 CFLAGS   := -std=c17 -Wall -Wextra -Wpedantic -Werror -O2
@@ -48,6 +55,8 @@ configure:
 	@echo "Compiler: $(CC)"
 	@echo "Prefix:   $(PREFIX)"
 	@echo "Binary:   $(BINDIR)/stn-stratum"
+	@echo "Config:   $(CONFIG_TARGET)"
+	@echo "Log:      $(LOG_TARGET)"
 	@mkdir -p $(BUILD_DIR)
 	@echo "Configuration complete."
 
@@ -69,15 +78,36 @@ $(BUILD_DIR)/platforms/linux/%.o: platforms/linux/%.c
 
 install: build
 	@echo "Installing STN-Stratum..."
+
 	install -d "$(DESTDIR)$(BINDIR)"
-	install -m 0755 "$(TARGET)" "$(DESTDIR)$(BINDIR)/stn-stratum"
+	install -d "$(DESTDIR)$(CONFIGDIR)"
+	install -d "$(DESTDIR)$(LOGDIR)"
+
+	install -m 0755 "$(TARGET)" \
+		"$(DESTDIR)$(BINDIR)/stn-stratum"
+
+	install -m 0644 "$(CONFIG_SOURCE)" \
+		"$(DESTDIR)$(CONFIG_TARGET)"
+
+	touch "$(DESTDIR)$(LOG_TARGET)"
+	chmod 0644 "$(DESTDIR)$(LOG_TARGET)"
+
 	@echo "Installed:"
 	@echo "  $(DESTDIR)$(BINDIR)/stn-stratum"
+	@echo "  $(DESTDIR)$(CONFIG_TARGET)"
+	@echo "  $(DESTDIR)$(LOG_TARGET)"
 
 uninstall:
 	@echo "Removing STN-Stratum..."
+
 	rm -f "$(DESTDIR)$(BINDIR)/stn-stratum"
-	@echo "STN-Stratum executable removed."
+	rm -f "$(DESTDIR)$(CONFIG_TARGET)"
+
+	@echo "Removed:"
+	@echo "  $(DESTDIR)$(BINDIR)/stn-stratum"
+	@echo "  $(DESTDIR)$(CONFIG_TARGET)"
+	@echo "Preserved:"
+	@echo "  $(DESTDIR)$(LOG_TARGET)"
 
 clean:
 	rm -rf "$(BUILD_DIR)"
