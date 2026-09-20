@@ -24,7 +24,7 @@ LOGDIR    ?= /var/log/stratum
 BUILD_DIR := build
 TARGET    := $(BUILD_DIR)/stn-stratum
 
-CONFIG_SOURCE := build/config/chains.json
+CONFIG_SOURCE := config/chains.json
 CONFIG_TARGET := $(CONFIGDIR)/config.json
 LOG_TARGET    := $(LOGDIR)/stratum.log
 
