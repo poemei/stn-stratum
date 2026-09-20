@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 STN-Labz. All rights reserved. */
+#define _POSIX_C_SOURCE 200809L
 #include "stn_rpc_linux.h"
 
 #ifdef __linux__
