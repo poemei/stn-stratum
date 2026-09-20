@@ -19,15 +19,16 @@
 #endif
 
 #define STN_STRATUM_DEFAULT_PORT 18475u
-#define STN_STRATUM_CHAIN_CONFIG "config/chains.json"
 #define STN_STRATUM_POLL_MS 250u
 #define STN_STRATUM_CHAIN_POLL_TICKS 4u
 #define STN_STRATUM_HEARTBEAT_CHAIN_POLLS 30u
 
 #ifdef _WIN32
+#define STN_STRATUM_CHAIN_CONFIG "config/chains.json"
 #define STN_STRATUM_LOG_PATH "logs\\stn-stratum.log"
 #elif defined(__linux__)
-#define STN_STRATUM_LOG_PATH "logs/stn-stratum.log"
+#define STN_STRATUM_CHAIN_CONFIG "/etc/stn-stratum/config.json"
+#define STN_STRATUM_LOG_PATH "/var/log/stratum/stratum.log"
 #endif
 
 typedef struct stn_stratum_client_session stn_stratum_client_session;
