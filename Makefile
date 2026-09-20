@@ -79,7 +79,15 @@ $(TARGET): $(OBJECTS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(OBJECTS) -o $@
 
-$(BUILD_DIR)/%.o: %.c
+$(BUILD_DIR)/src/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/src/crypto/ed25519_donna/%.o: src/crypto/ed25519_donna/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/platforms/linux/%.o: platforms/linux/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
