@@ -22,6 +22,7 @@ From an x64 Visual Studio developer command prompt in this repository:
 build.cmd
 build\test-chain-interface.exe --selftest
 build\test-stratum.exe
+build\test-work-unavailable.exe
 ```
 
 Run `build\stn-stratum.exe` to start the server. It connects to Chain at

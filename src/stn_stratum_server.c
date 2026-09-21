@@ -735,8 +735,19 @@ static void refresh_work(stn_stratum_server *server)
             return;
         }
 
-        if(code==STN_RPC_CLIENT_TRANSPORT ||
-           code==STN_RPC_CLIENT_UNAVAILABLE)
+        if(code==STN_RPC_CLIENT_UNAVAILABLE){
+            if(!server->chain_available || server->have_work ||
+               (server->chain_poll_count%STN_STRATUM_HEARTBEAT_CHAIN_POLLS)==1u){
+                log_line(server,
+                    "CHAIN RPC reachable; mining template unavailable code=5; "
+                    "retaining server and retrying.");
+            }
+            server->chain_available=1;
+            clear_work(server);
+            return;
+        }
+
+        if(code==STN_RPC_CLIENT_TRANSPORT)
         {
             if(server->chain_available){
                 log_line(server,
@@ -1869,8 +1880,19 @@ static void refresh_work(stn_stratum_server *server)
             return;
         }
 
-        if(code==STN_RPC_CLIENT_TRANSPORT ||
-           code==STN_RPC_CLIENT_UNAVAILABLE)
+        if(code==STN_RPC_CLIENT_UNAVAILABLE){
+            if(!server->chain_available || server->have_work ||
+               (server->chain_poll_count%STN_STRATUM_HEARTBEAT_CHAIN_POLLS)==1u){
+                log_line(server,
+                    "CHAIN RPC reachable; mining template unavailable code=5; "
+                    "retaining server and retrying.");
+            }
+            server->chain_available=1;
+            clear_work(server);
+            return;
+        }
+
+        if(code==STN_RPC_CLIENT_TRANSPORT)
         {
             if(server->chain_available){
                 log_line(

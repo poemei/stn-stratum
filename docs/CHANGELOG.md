@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Mining-template availability versus transport failure
+
+- Windows and Linux refresh paths now retain a responding Chain endpoint after
+  template UNAVAILABLE, clear obsolete work and retry without server rotation.
+  Logs identify RPC reachability separately from mining-work availability.
+- Genuine transport failures retain existing failover behavior. No template,
+  transactions or Chain consensus rules are fabricated to hide unavailable work.
+- Added a direct refresh-path regression for repeated UNAVAILABLE and transport
+  failure. Linux execution and deployed Chain's underlying cause remain unverified.
+- Windows x64 /W4 /WX build and refresh regression passed; existing 27-check RPC
+  parser and Stratum tests passed. Built stn-stratum-qualified.exe because the
+  normal executable was locked; the running executable was not stopped/replaced.
+
 ### STNC v2 RPC compatibility — 2026-09-10
 
 - Updated the Stratum client and live server for Chain STNC v2: version 2

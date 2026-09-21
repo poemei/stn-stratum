@@ -10,7 +10,8 @@
 [Rr]elease/
 
 # Test output
-/tests/
+/tests/*
+!/tests/test_work_unavailable.c
 
 # Visual Studio per-user state and caches
 .vs/
