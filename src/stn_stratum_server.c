@@ -1226,6 +1226,9 @@ static void telemetry_close(stn_stratum_server *server)
     }
 }
 
+static stn_chain_config_entry *active_chain(
+    stn_stratum_server *server);
+
 static void telemetry_service(stn_stratum_server *server)
 {
     int client;
