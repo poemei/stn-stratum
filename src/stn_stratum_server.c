@@ -1073,12 +1073,6 @@ static void log_line(stn_stratum_server *server,const char *format,...)
 
 static int log_open(stn_stratum_server *server)
 {
-	/**
-    if(mkdir("logs",0755)!=0 && errno!=EEXIST){
-        return 0;
-    }
-	*/
-
     server->log_file=fopen(STN_STRATUM_LOG_PATH,"a");
 
     if(server->log_file==NULL){
@@ -1170,6 +1164,140 @@ static void client_remove(
     }
 
     free(client);
+}
+
+static void hex32(char out[65],const uint8_t value[32])
+{
+    static const char table[]="0123456789abcdef";
+    size_t i;
+
+    for(i=0u;i<32u;i++){
+        out[i*2u]=table[(value[i]>>4)&0x0fu];
+        out[i*2u+1u]=table[value[i]&0x0fu];
+    }
+
+    out[64]='\0';
+}
+
+static int telemetry_open(stn_stratum_server *server)
+{
+    int socket_fd;
+    int flags;
+    int reuse=1;
+    struct sockaddr_in addr;
+
+    socket_fd=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
+    if(socket_fd<0){return 0;}
+
+    if(setsockopt(socket_fd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse))!=0){
+        (void)close(socket_fd);
+        return 0;
+    }
+
+    memset(&addr,0,sizeof(addr));
+    addr.sin_family=AF_INET;
+    addr.sin_addr.s_addr=htonl(INADDR_ANY);
+    addr.sin_port=htons(STN_STRATUM_TELEMETRY_PORT);
+
+    if(bind(socket_fd,(const struct sockaddr *)&addr,sizeof(addr))!=0 ||
+       listen(socket_fd,SOMAXCONN)!=0)
+    {
+        (void)close(socket_fd);
+        return 0;
+    }
+
+    flags=fcntl(socket_fd,F_GETFL,0);
+    if(flags<0 || fcntl(socket_fd,F_SETFL,flags|O_NONBLOCK)!=0){
+        (void)close(socket_fd);
+        return 0;
+    }
+
+    server->telemetry_socket=(uintptr_t)socket_fd;
+    log_line(server,"TELEMETRY 0.0.0.0:%u ready.",(unsigned)STN_STRATUM_TELEMETRY_PORT);
+    return 1;
+}
+
+static void telemetry_close(stn_stratum_server *server)
+{
+    if(server->telemetry_socket!=STN_INVALID_SOCKET_VALUE){
+        (void)close((int)server->telemetry_socket);
+        server->telemetry_socket=STN_INVALID_SOCKET_VALUE;
+        log_line(server,"TELEMETRY port %u closed.",(unsigned)STN_STRATUM_TELEMETRY_PORT);
+    }
+}
+
+static void telemetry_service(stn_stratum_server *server)
+{
+    int client;
+    char request[512];
+    char body[1024];
+    char response[1400];
+    char job[65];
+    char base[65];
+    char target[65];
+    const char *chain_host="";
+    unsigned chain_port=0u;
+    unsigned long long uptime=0u;
+    ssize_t got;
+    int body_length;
+    int response_length;
+    time_t now;
+    stn_chain_config_entry *entry;
+
+    client=accept((int)server->telemetry_socket,NULL,NULL);
+    if(client<0){
+        if(errno!=EAGAIN && errno!=EWOULDBLOCK && errno!=EINTR){
+            log_line(server,"WARN telemetry accept failed: errno=%d.",errno);
+        }
+        return;
+    }
+
+    got=recv(client,request,sizeof(request)-1u,0);
+    if(got<=0){(void)close(client);return;}
+    request[(size_t)got]='\0';
+
+    if(strncmp(request,"GET /status ",12)!=0 && strncmp(request,"GET / ",6)!=0){
+        static const char not_found[]="HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        (void)send_all(client,(const uint8_t *)not_found,sizeof(not_found)-1u);
+        (void)close(client);
+        return;
+    }
+
+    memset(job,'0',64u); job[64]='\0';
+    memset(base,'0',64u); base[64]='\0';
+    memset(target,'0',64u); target[64]='\0';
+
+    if(server->have_work){
+        hex32(job,server->active_job_id);
+        hex32(base,server->active_base);
+        if(server->active_template_length>=68u+STN_MINER_CHAIN_TARGET_OFFSET+32u){
+            hex32(target,server->active_template+68u+STN_MINER_CHAIN_TARGET_OFFSET);
+        }
+    }
+
+    entry=active_chain(server);
+    if(entry!=NULL){chain_host=entry->host;chain_port=(unsigned)entry->port;}
+
+    now=time(NULL);
+    if(server->started_at!=(time_t)0 && now>=server->started_at){
+        uptime=(unsigned long long)(now-server->started_at);
+    }
+
+    body_length=snprintf(body,sizeof(body),
+        "{\"service\":\"STN-Stratum\",\"status\":\"running\",\"chain_connected\":%s,\"chain_host\":\"%s\",\"chain_port\":%u,\"work_available\":%s,\"miners\":%zu,\"job_id\":\"%s\",\"base_id\":\"%s\",\"target\":\"%s\",\"uptime_seconds\":%llu}\n",
+        server->chain_available?"true":"false",chain_host,chain_port,
+        server->have_work?"true":"false",server->client_count,job,base,target,uptime);
+
+    if(body_length<0 || (size_t)body_length>=sizeof(body)){(void)close(client);return;}
+
+    response_length=snprintf(response,sizeof(response),
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n%s",
+        body_length,body);
+
+    if(response_length>0 && (size_t)response_length<sizeof(response)){
+        (void)send_all(client,(const uint8_t *)response,(size_t)response_length);
+    }
+    (void)close(client);
 }
 
 static int listener_open(stn_stratum_server *server)
@@ -2061,6 +2189,10 @@ void stn_stratum_server_init(stn_stratum_server *server)
     server->listen_socket=
         STN_INVALID_SOCKET_VALUE;
 
+    server->telemetry_socket=
+        STN_INVALID_SOCKET_VALUE;
+
+    server->started_at=time(NULL);
     server->running=1;
 }
 
@@ -2162,9 +2294,19 @@ int stn_stratum_server_run(stn_stratum_server *server)
         return 0;
     }
 
+    if(!telemetry_open(server)){
+        log_line(
+            server,
+            "ERROR unable to open telemetry listener on port %u.",
+            (unsigned)STN_STRATUM_TELEMETRY_PORT);
+        log_line(server,"STOP startup failed.");
+        return 0;
+    }
+
     while(server->running){
         accept_clients(server);
         service_clients(server);
+        telemetry_service(server);
 
         if((server->loop_count%
             STN_STRATUM_CHAIN_POLL_TICKS)==0u)
@@ -2203,6 +2345,7 @@ void stn_stratum_server_close(stn_stratum_server *server)
             NULL);
     }
 
+    telemetry_close(server);
     listener_close(server);
 
     stn_rpc_linux_close(

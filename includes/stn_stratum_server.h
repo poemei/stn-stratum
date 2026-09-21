@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <time.h>
 
 #include "stn_rpc_client.h"
 #include "stn_miner_protocol.h"
@@ -19,6 +20,8 @@
 #endif
 
 #define STN_STRATUM_DEFAULT_PORT 18475u
+#define STN_STRATUM_TELEMETRY_PORT 18476u
+
 #define STN_STRATUM_POLL_MS 250u
 #define STN_STRATUM_CHAIN_POLL_TICKS 4u
 #define STN_STRATUM_HEARTBEAT_CHAIN_POLLS 30u
@@ -52,6 +55,8 @@ typedef struct stn_stratum_server {
     int have_work;
 
     uintptr_t listen_socket;
+    uintptr_t telemetry_socket;
+
     stn_stratum_client_session *clients;
     size_t client_count;
 
@@ -63,8 +68,11 @@ typedef struct stn_stratum_server {
 #endif
 
     FILE *log_file;
+
     uint64_t loop_count;
     uint64_t chain_poll_count;
+
+    time_t started_at;
 } stn_stratum_server;
 
 void stn_stratum_server_init(stn_stratum_server *server);
