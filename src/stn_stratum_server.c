@@ -24,11 +24,11 @@
 
 struct stn_stratum_client_session {
     uintptr_t socket;
-    uint8_t rx[STN_MINER_ADDRESS_SIZE];
+    uint8_t rx[STN_MINER_ADDRESS_FRAME_SIZE];
     size_t rx_used;
     uint8_t sent_job_id[32];
     uint64_t hashrate;
-    char address[70];
+    char address[STN_MINER_ADDRESS_SIZE];
     int address_registered;
     int has_job;
     struct stn_stratum_client_session *next;
@@ -635,7 +635,7 @@ static int address_valid(const uint8_t *p)
        p[5]!=STN_MINER_ADDRESS ||
        p[6]!=0 || p[7]!=0){return 0;}
     if(memcmp(p+8,"stn0_",5)!=0){return 0;}
-    for(i=13u;i<STN_MINER_ADDRESS_SIZE;i++){
+    for(i=13u;i<8u+STN_MINER_ADDRESS_LENGTH;i++){
         if(!((p[i]>=(uint8_t)'0' && p[i]<=(uint8_t)'9') ||
              (p[i]>=(uint8_t)'a' && p[i]<=(uint8_t)'f'))){return 0;}
     }
@@ -657,8 +657,8 @@ static void process_address(
         client_remove(server,client,"invalid ADDRESS");
         return;
     }
-    memcpy(client->address,client->rx+8,69u);
-    client->address[69]='\0';
+    memcpy(client->address,client->rx+8,STN_MINER_ADDRESS_LENGTH);
+    client->address[STN_MINER_ADDRESS_LENGTH]='\0';
     client->address_registered=1;
     log_line(server,"CLIENT address registered: %s.",client->address);
     if(server->have_work){(void)client_send_job(server,client);}
@@ -768,7 +768,7 @@ static void service_client(
             return;
         }
         else if(client->rx[5]==STN_MINER_ADDRESS){
-            frame_size=STN_MINER_ADDRESS_SIZE;
+            frame_size=STN_MINER_ADDRESS_FRAME_SIZE;
         }
         else if(client->rx[5]==STN_MINER_SUBMIT){
             frame_size=STN_MINER_SUBMIT_SIZE;
@@ -1164,11 +1164,11 @@ void stn_stratum_server_close(stn_stratum_server *server)
 
 struct stn_stratum_client_session {
     uintptr_t socket;
-    uint8_t rx[STN_MINER_ADDRESS_SIZE];
+    uint8_t rx[STN_MINER_ADDRESS_FRAME_SIZE];
     size_t rx_used;
     uint8_t sent_job_id[32];
     uint64_t hashrate;
-    char address[70];
+    char address[STN_MINER_ADDRESS_SIZE];
     int address_registered;
     int has_job;
     struct stn_stratum_client_session *next;
@@ -2059,7 +2059,7 @@ static int address_valid(const uint8_t *p)
        p[5]!=STN_MINER_ADDRESS ||
        p[6]!=0 || p[7]!=0){return 0;}
     if(memcmp(p+8,"stn0_",5)!=0){return 0;}
-    for(i=13u;i<STN_MINER_ADDRESS_SIZE;i++){
+    for(i=13u;i<8u+STN_MINER_ADDRESS_LENGTH;i++){
         if(!((p[i]>=(uint8_t)'0' && p[i]<=(uint8_t)'9') ||
              (p[i]>=(uint8_t)'a' && p[i]<=(uint8_t)'f'))){return 0;}
     }
@@ -2081,8 +2081,8 @@ static void process_address(
         client_remove(server,client,"invalid ADDRESS");
         return;
     }
-    memcpy(client->address,client->rx+8,69u);
-    client->address[69]='\0';
+    memcpy(client->address,client->rx+8,STN_MINER_ADDRESS_LENGTH);
+    client->address[STN_MINER_ADDRESS_LENGTH]='\0';
     client->address_registered=1;
     log_line(server,"CLIENT address registered: %s.",client->address);
     if(server->have_work){(void)client_send_job(server,client);}
@@ -2237,7 +2237,7 @@ static void service_client(
         }
 
         if(client->rx[5]==STN_MINER_ADDRESS){
-            frame_size=STN_MINER_ADDRESS_SIZE;
+            frame_size=STN_MINER_ADDRESS_FRAME_SIZE;
         }
         else if(client->rx[5]==STN_MINER_SUBMIT){
             frame_size=STN_MINER_SUBMIT_SIZE;
