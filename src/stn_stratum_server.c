@@ -2172,7 +2172,6 @@ static void service_client(
     stn_stratum_client_session *client)
 {
     int socket_fd;
-    size_t frame_size;
 
     if(client==NULL){return;}
 
@@ -2183,18 +2182,61 @@ static void service_client(
     socket_fd=(int)client->socket;
 
     for(;;){
-        if(client->rx_used<8u){
-            frame_size=8u;
-        }
-        else if(memcmp(client->rx,STN_MINER_MAGIC,4)!=0 ||
-                client->rx[4]!=STN_MINER_VERSION ||
-                client->rx[6]!=0 ||
-                client->rx[7]!=0)
-        {
-            client_remove(server,client,"invalid frame header");
+        size_t frame_size;
+
+        while(client->rx_used<8u){
+            ssize_t got=recv(
+                socket_fd,
+                client->rx+client->rx_used,
+                8u-client->rx_used,
+                0);
+
+            if(got>0){
+                client->rx_used+=(size_t)got;
+                continue;
+            }
+
+            if(got==0){
+                client_remove(
+                    server,
+                    client,
+                    "peer closed");
+                return;
+            }
+
+            if(errno==EINTR){
+                continue;
+            }
+
+            if(errno==EAGAIN ||
+               errno==EWOULDBLOCK)
+            {
+                return;
+            }
+
+            client_remove(
+                server,
+                client,
+                "receive failed");
             return;
         }
-        else if(client->rx[5]==STN_MINER_ADDRESS){
+
+        if(memcmp(
+               client->rx,
+               STN_MINER_MAGIC,
+               4)!=0 ||
+           client->rx[4]!=STN_MINER_VERSION ||
+           client->rx[6]!=0 ||
+           client->rx[7]!=0)
+        {
+            client_remove(
+                server,
+                client,
+                "invalid frame header");
+            return;
+        }
+
+        if(client->rx[5]==STN_MINER_ADDRESS){
             frame_size=STN_MINER_ADDRESS_SIZE;
         }
         else if(client->rx[5]==STN_MINER_SUBMIT){
@@ -2204,16 +2246,19 @@ static void service_client(
             frame_size=STN_MINER_HASH_PROGRESS_SIZE;
         }
         else{
-            client_remove(server,client,"unsupported frame type");
+            client_remove(
+                server,
+                client,
+                "unsupported frame type");
             return;
         }
 
         while(client->rx_used<frame_size){
             ssize_t got=recv(
-            socket_fd,
-            client->rx+client->rx_used,
-            frame_size-client->rx_used,
-            0);
+                socket_fd,
+                client->rx+client->rx_used,
+                frame_size-client->rx_used,
+                0);
 
             if(got>0){
                 client->rx_used+=(size_t)got;
@@ -2222,47 +2267,53 @@ static void service_client(
 
             if(got==0){
                 client_remove(
-                server,
-                client,
-                "peer closed");
+                    server,
+                    client,
+                    "peer closed");
                 return;
             }
 
-        if(errno==EINTR){
-            continue;
-        }
+            if(errno==EINTR){
+                continue;
+            }
 
-        if(errno==EAGAIN || errno==EWOULDBLOCK){
-            break;
-        }
+            if(errno==EAGAIN ||
+               errno==EWOULDBLOCK)
+            {
+                return;
+            }
 
-        client_remove(
-            server,
-            client,
-            "receive failed");
-
-        return;
-        }
-
-        if(client->rx_used<frame_size){
+            client_remove(
+                server,
+                client,
+                "receive failed");
             return;
         }
 
         if(client->rx[5]==STN_MINER_ADDRESS){
-            process_address(server,client);
+            process_address(
+                server,
+                client);
         }
         else if(client->rx[5]==STN_MINER_SUBMIT){
-            process_submission(server,client);
+            process_submission(
+                server,
+                client);
         }
         else{
-            process_hash_progress(server,client);
+            process_hash_progress(
+                server,
+                client);
         }
 
         {
             stn_stratum_client_session *probe;
             int still_connected=0;
 
-            for(probe=server->clients;probe!=NULL;probe=probe->next){
+            for(probe=server->clients;
+                probe!=NULL;
+                probe=probe->next)
+            {
                 if(probe==client){
                     still_connected=1;
                     break;
