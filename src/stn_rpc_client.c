@@ -4,6 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define STN_RPC_CLIENT_BLOCK_HEADER_SIZE 168u
+#define STN_RPC_CLIENT_MINING_PREFIX_SIZE 68u
+
 static uint64_t read_be(const uint8_t *p,size_t n)
 {
     uint64_t v=0;
@@ -142,9 +145,16 @@ static stn_rpc_client_code call(
     if((method==STN_RPC_CLIENT_INFO && response_length!=184u) ||
        (method==STN_RPC_CLIENT_SUBMIT_WORK && response_length!=80u) ||
        (method==STN_RPC_CLIENT_MINING_TEMPLATE &&
-        (response_length<432u || read_be(response+24+64,4)!=response_length-68u ||
-         memcmp(response+24+68,"STNB",4)!=0 || read_be(response+24+72,2)!=3u))){
-        result=STN_RPC_CLIENT_INVALID;goto done;
+        (response_length<
+             STN_RPC_CLIENT_MINING_PREFIX_SIZE+
+             STN_RPC_CLIENT_BLOCK_HEADER_SIZE ||
+         read_be(response+24+64,4)!=
+             response_length-STN_RPC_CLIENT_MINING_PREFIX_SIZE ||
+         memcmp(response+24+STN_RPC_CLIENT_MINING_PREFIX_SIZE,"STNB",4)!=0 ||
+         read_be(response+24+STN_RPC_CLIENT_MINING_PREFIX_SIZE+4,2)!=3u)))
+    {
+        result=STN_RPC_CLIENT_INVALID;
+        goto done;
     }
 
     if(response_length!=0u){

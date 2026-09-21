@@ -3,12 +3,29 @@
 
 #include <string.h>
 
+#define STN_CHAIN_BLOCK_HEADER_SIZE   168u
+#define STN_CHAIN_BLOCK_HEIGHT_OFFSET 72u
+#define STN_CHAIN_BLOCK_TARGET_OFFSET 120u
+#define STN_CHAIN_BLOCK_NONCE_OFFSET  152u
+
 static uint32_t read32be(const uint8_t *p)
 {
     return ((uint32_t)p[0]<<24)|
            ((uint32_t)p[1]<<16)|
            ((uint32_t)p[2]<<8)|
            (uint32_t)p[3];
+}
+
+static uint64_t read64be(const uint8_t *p)
+{
+    uint64_t v=0u;
+    size_t i;
+
+    for(i=0;i<8u;i++){
+        v=(v<<8)|p[i];
+    }
+
+    return v;
 }
 
 static void write64be(uint8_t *p,uint64_t v)
@@ -53,7 +70,9 @@ static stn_stratum_status rpc_tip(void *user,uint8_t tip[32])
     if(code!=STN_RPC_CLIENT_OK){
         return map_rpc(code);
     }
-    if(written<68u||read32be(payload+64)!=(uint32_t)(written-68u)){
+
+    if(written<68u+STN_CHAIN_BLOCK_HEADER_SIZE ||
+       read32be(payload+64)!=(uint32_t)(written-68u)){
         return STN_STRATUM_STRUCTURE;
     }
 
@@ -78,6 +97,7 @@ static stn_stratum_status rpc_template(
     stn_rpc_client_code code;
 
     if(written!=NULL){*written=0;}
+
     if(a==NULL||a->client==NULL||base_tip==NULL||
        job_id==NULL||target==NULL||height==NULL||
        block==NULL||written==NULL)
@@ -91,14 +111,21 @@ static stn_stratum_status rpc_template(
     if(code!=STN_RPC_CLIENT_OK){
         return map_rpc(code);
     }
-    if(n<68u){
+
+    if(n<68u+STN_CHAIN_BLOCK_HEADER_SIZE){
         return STN_STRATUM_STRUCTURE;
     }
 
     block_length=read32be(payload+64);
+
     if((size_t)block_length!=n-68u){
         return STN_STRATUM_STRUCTURE;
     }
+
+    if(block_length<STN_CHAIN_BLOCK_HEADER_SIZE){
+        return STN_STRATUM_STRUCTURE;
+    }
+
     if((size_t)block_length>capacity){
         return STN_STRATUM_CAPACITY;
     }
@@ -108,12 +135,17 @@ static stn_stratum_status rpc_template(
     memcpy(block,payload+68,block_length);
 
     /*
-     * STN-Chain's public RPC shape guarantees the encoded block but the
-     * uploaded RPC contract does not publish offsets for target/height
-     * inside that block. Do not guess them here.
+     * Mining metadata is taken directly from the canonical encoded block
+     * supplied by STN Chain. Stratum does not calculate or reinterpret
+     * consensus state.
      */
-    memset(target,0,32);
-    *height=0u;
+    memcpy(target,
+        payload+68u+STN_CHAIN_BLOCK_TARGET_OFFSET,
+        32u);
+
+    *height=read64be(
+        payload+68u+STN_CHAIN_BLOCK_HEIGHT_OFFSET);
+
     *written=block_length;
     return STN_STRATUM_OK;
 }
@@ -133,7 +165,8 @@ static stn_stratum_status rpc_submit(
     stn_rpc_client_code code;
 
     if(a==NULL||a->client==NULL||base_tip==NULL||
-       job_id==NULL||block==NULL||block_length<160u||
+       job_id==NULL||block==NULL||
+       block_length<STN_CHAIN_BLOCK_HEADER_SIZE||
        block_length>STN_RPC_CLIENT_MAX_PAYLOAD-68u)
     {
         return STN_STRATUM_ARGUMENT;
@@ -141,17 +174,21 @@ static stn_stratum_status rpc_submit(
 
     memcpy(payload,base_tip,32);
     memcpy(payload+32,job_id,32);
+
     payload[64]=(uint8_t)(block_length>>24);
     payload[65]=(uint8_t)(block_length>>16);
     payload[66]=(uint8_t)(block_length>>8);
     payload[67]=(uint8_t)block_length;
+
     memcpy(payload+68,block,block_length);
 
     /*
-     * Existing Stratum/Chain contract places nonce at encoded block offset
-     * 152, matching the current Stratum implementation.
+     * Only the canonical nonce field is changed. All other work bytes remain
+     * exactly as supplied by STN Chain.
      */
-    write64be(payload+68+152u,nonce);
+    write64be(
+        payload+68u+STN_CHAIN_BLOCK_NONCE_OFFSET,
+        nonce);
 
     code=stn_rpc_client_submit_work(
         a->client,
@@ -164,6 +201,7 @@ static stn_stratum_status rpc_submit(
     if(code!=STN_RPC_CLIENT_OK){
         return map_rpc(code);
     }
+
     if(n!=80u){
         return STN_STRATUM_STRUCTURE;
     }
