@@ -1,36 +1,66 @@
-/* Copyright (c) 2026 STN-Labz. All rights reserved. */
-/*
- * Temporary STN-Stratum development miner protocol.
- * This exists only to qualify miner <-> Stratum <-> Chain plumbing.
- */
-#ifndef STN_MINER_PROTOCOL_H
-#define STN_MINER_PROTOCOL_H
+#ifndef STN_STRATUM_SERVER_H
+#define STN_STRATUM_SERVER_H
 
+#include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 
-#define STN_MINER_MAGIC "STNM"
-#define STN_MINER_VERSION 1u
+#include "stn_chain_config.h"
+#include "stn_chain_rpc_adapter.h"
 
-#define STN_MINER_JOB    1u
-#define STN_MINER_SUBMIT 2u
-#define STN_MINER_RESULT 3u
-#define STN_MINER_HASH_PROGRESS 4u
-#define STN_MINER_ADDRESS 5u
+#ifdef _WIN32
+#include <winsock2.h>
+#include "stn_rpc_win32.h"
+#else
+#include "stn_rpc_linux.h"
+#endif
 
-#define STN_MINER_JOB_HEADER_SIZE 84u
-#define STN_MINER_SUBMIT_SIZE 48u
-#define STN_MINER_RESULT_SIZE 12u
-#define STN_MINER_HASH_PROGRESS_SIZE 56u
-#define STN_MINER_ADDRESS_SIZE 77u
+#define STN_STRATUM_PORT 18475u
+#define STN_STRATUM_TELEMETRY_PORT 18476u
 
-#define STN_MINER_CHAIN_HEADER_SIZE 168u
-#define STN_MINER_CHAIN_TARGET_OFFSET 120u
-#define STN_MINER_CHAIN_NONCE_OFFSET 152u
+typedef struct stn_stratum_client_session stn_stratum_client_session;
 
-#define STN_MINER_RESULT_ACCEPTED 0u
-#define STN_MINER_RESULT_REJECTED 1u
-#define STN_MINER_RESULT_STALE 2u
-#define STN_MINER_RESULT_PROVIDER 3u
-#define STN_MINER_RESULT_PROTOCOL 4u
+typedef struct stn_stratum_server {
+#ifdef _WIN32
+    SOCKET listen_socket;
+    SOCKET telemetry_socket;
+    stn_rpc_win32 chain_transport;
+#else
+    int listen_socket;
+    int telemetry_socket;
+    stn_rpc_linux chain_transport;
+#endif
+
+    stn_chain_config chain_config;
+    size_t chain_index;
+
+    stn_chain_rpc_adapter chain_adapter;
+
+    stn_stratum_client_session *clients;
+
+    uint8_t *work;
+    size_t work_length;
+
+    int have_work;
+    int running;
+
+    time_t started_at;
+} stn_stratum_server;
+
+void stn_stratum_server_init(
+    stn_stratum_server *server
+);
+
+void stn_stratum_server_close(
+    stn_stratum_server *server
+);
+
+void stn_stratum_server_stop(
+    stn_stratum_server *server
+);
+
+int stn_stratum_server_run(
+    stn_stratum_server *server
+);
 
 #endif
