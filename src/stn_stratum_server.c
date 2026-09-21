@@ -24,9 +24,10 @@
 
 struct stn_stratum_client_session {
     uintptr_t socket;
-    uint8_t rx[STN_MINER_SUBMIT_SIZE];
+    uint8_t rx[STN_MINER_HASH_PROGRESS_SIZE];
     size_t rx_used;
     uint8_t sent_job_id[32];
+    uint64_t hashrate;
     int has_job;
     struct stn_stratum_client_session *next;
 };
@@ -427,6 +428,7 @@ static void clear_client_jobs(stn_stratum_server *server)
 
     for(client=server->clients;client!=NULL;client=client->next){
         client->has_job=0;
+        client->hashrate=0u;
         memset(client->sent_job_id,0,sizeof(client->sent_job_id));
     }
 }
@@ -620,53 +622,166 @@ static void process_submission(
     }
 }
 
+static void process_hash_progress(
+    stn_stratum_server *server,
+    stn_stratum_client_session *client)
+{
+    const uint8_t *p;
+    uint64_t hashes;
+    uint64_t elapsed_ms;
+    uint64_t quotient;
+    uint64_t remainder;
+    uint64_t rate;
+
+    if(server==NULL || client==NULL){return;}
+
+    p=client->rx;
+
+    if(memcmp(p,STN_MINER_MAGIC,4)!=0 ||
+       p[4]!=STN_MINER_VERSION ||
+       p[5]!=STN_MINER_HASH_PROGRESS ||
+       p[6]!=0 ||
+       p[7]!=0)
+    {
+        return;
+    }
+
+    if(!server->have_work ||
+       !client->has_job ||
+       memcmp(p+8,server->active_job_id,32)!=0 ||
+       memcmp(p+8,client->sent_job_id,32)!=0)
+    {
+        client->hashrate=0u;
+        return;
+    }
+
+    hashes=read64be(p+40);
+    elapsed_ms=read64be(p+48);
+
+    if(elapsed_ms==0u){
+        client->hashrate=0u;
+        return;
+    }
+
+    quotient=hashes/elapsed_ms;
+    remainder=hashes%elapsed_ms;
+
+    if(quotient>UINT64_MAX/1000u){
+        rate=UINT64_MAX;
+    }
+    else{
+        rate=quotient*1000u;
+
+        {
+            uint64_t extra;
+
+            if(remainder<=UINT64_MAX/1000u){
+                extra=(remainder*1000u)/elapsed_ms;
+            }
+            else{
+                uint64_t scaled_divisor=(elapsed_ms/1000u)+1u;
+                extra=remainder/scaled_divisor;
+                if(extra>999u){extra=999u;}
+            }
+
+            if(UINT64_MAX-rate<extra){
+                rate=UINT64_MAX;
+            }
+            else{
+                rate+=extra;
+            }
+        }
+    }
+
+    client->hashrate=rate;
+}
+
 static void service_client(
     stn_stratum_server *server,
     stn_stratum_client_session *client)
 {
     SOCKET socket;
+    size_t frame_size;
 
     if(client==NULL){return;}
 
     socket=(SOCKET)client->socket;
     if(socket==INVALID_SOCKET){return;}
 
-    while(client->rx_used<STN_MINER_SUBMIT_SIZE){
-        int got=recv(
-            socket,
-            (char *)client->rx+client->rx_used,
-            (int)(STN_MINER_SUBMIT_SIZE-client->rx_used),
-            0);
-
-        if(got>0){
-            client->rx_used+=(size_t)got;
-            continue;
+    for(;;){
+        if(client->rx_used<8u){
+            frame_size=8u;
         }
-
-        if(got==0){
-            client_remove(server,client,"peer closed");
+        else if(memcmp(client->rx,STN_MINER_MAGIC,4)!=0 ||
+                client->rx[4]!=STN_MINER_VERSION ||
+                client->rx[6]!=0 ||
+                client->rx[7]!=0)
+        {
+            client_remove(server,client,"invalid frame header");
             return;
         }
+        else if(client->rx[5]==STN_MINER_SUBMIT){
+            frame_size=STN_MINER_SUBMIT_SIZE;
+        }
+        else if(client->rx[5]==STN_MINER_HASH_PROGRESS){
+            frame_size=STN_MINER_HASH_PROGRESS_SIZE;
+        }
+        else{
+            client_remove(server,client,"unsupported frame type");
+            return;
+        }
+
+        while(client->rx_used<frame_size){
+            int got=recv(
+            socket,
+            (char *)client->rx+client->rx_used,
+            (int)(frame_size-client->rx_used),
+            0);
+
+            if(got>0){
+                client->rx_used+=(size_t)got;
+                continue;
+            }
+
+            if(got==0){
+                client_remove(server,client,"peer closed");
+                return;
+            }
 
         if(WSAGetLastError()==WSAEWOULDBLOCK){break;}
 
         client_remove(server,client,"receive failed");
         return;
-    }
+        }
 
-    if(client->rx_used==STN_MINER_SUBMIT_SIZE){
-        process_submission(server,client);
+        if(client->rx_used<frame_size){
+            return;
+        }
+
+        if(frame_size==STN_MINER_SUBMIT_SIZE){
+            process_submission(server,client);
+        }
+        else{
+            process_hash_progress(server,client);
+        }
 
         {
             stn_stratum_client_session *probe;
+            int still_connected=0;
 
             for(probe=server->clients;probe!=NULL;probe=probe->next){
                 if(probe==client){
-                    client->rx_used=0u;
+                    still_connected=1;
                     break;
                 }
             }
+
+            if(!still_connected){
+                return;
+            }
         }
+
+        client->rx_used=0u;
     }
 }
 
@@ -995,9 +1110,10 @@ void stn_stratum_server_close(stn_stratum_server *server)
 
 struct stn_stratum_client_session {
     uintptr_t socket;
-    uint8_t rx[STN_MINER_SUBMIT_SIZE];
+    uint8_t rx[STN_MINER_HASH_PROGRESS_SIZE];
     size_t rx_used;
     uint8_t sent_job_id[32];
+    uint64_t hashrate;
     int has_job;
     struct stn_stratum_client_session *next;
 };
@@ -1241,6 +1357,7 @@ static void telemetry_service(stn_stratum_server *server)
     const char *chain_host="";
     unsigned chain_port=0u;
     unsigned long long uptime=0u;
+    uint64_t hashrate=0u;
     ssize_t got;
     int body_length;
     int response_length;
@@ -1286,10 +1403,24 @@ static void telemetry_service(stn_stratum_server *server)
         uptime=(unsigned long long)(now-server->started_at);
     }
 
+    {
+        stn_stratum_client_session *miner;
+
+        for(miner=server->clients;miner!=NULL;miner=miner->next){
+            if(UINT64_MAX-hashrate<miner->hashrate){
+                hashrate=UINT64_MAX;
+                break;
+            }
+
+            hashrate+=miner->hashrate;
+        }
+    }
+
     body_length=snprintf(body,sizeof(body),
-        "{\"service\":\"STN-Stratum\",\"status\":\"running\",\"chain_connected\":%s,\"chain_host\":\"%s\",\"chain_port\":%u,\"work_available\":%s,\"miners\":%zu,\"job_id\":\"%s\",\"base_id\":\"%s\",\"target\":\"%s\",\"uptime_seconds\":%llu}\n",
+        "{\"service\":\"STN-Stratum\",\"status\":\"running\",\"chain_connected\":%s,\"chain_host\":\"%s\",\"chain_port\":%u,\"work_available\":%s,\"miners\":%zu,\"hashrate\":%llu,\"job_id\":\"%s\",\"base_id\":\"%s\",\"target\":\"%s\",\"uptime_seconds\":%llu}\n",
         server->chain_available?"true":"false",chain_host,chain_port,
-        server->have_work?"true":"false",server->client_count,job,base,target,uptime);
+        server->have_work?"true":"false",server->client_count,
+        (unsigned long long)hashrate,job,base,target,uptime);
 
     if(body_length<0 || (size_t)body_length>=sizeof(body)){(void)close(client);return;}
 
@@ -1605,6 +1736,7 @@ static void clear_client_jobs(stn_stratum_server *server)
         client=client->next)
     {
         client->has_job=0;
+        client->hashrate=0u;
         memset(
             client->sent_job_id,
             0,
@@ -1865,11 +1997,86 @@ static void process_submission(
     }
 }
 
+static void process_hash_progress(
+    stn_stratum_server *server,
+    stn_stratum_client_session *client)
+{
+    const uint8_t *p;
+    uint64_t hashes;
+    uint64_t elapsed_ms;
+    uint64_t quotient;
+    uint64_t remainder;
+    uint64_t rate;
+
+    if(server==NULL || client==NULL){return;}
+
+    p=client->rx;
+
+    if(memcmp(p,STN_MINER_MAGIC,4)!=0 ||
+       p[4]!=STN_MINER_VERSION ||
+       p[5]!=STN_MINER_HASH_PROGRESS ||
+       p[6]!=0 ||
+       p[7]!=0)
+    {
+        return;
+    }
+
+    if(!server->have_work ||
+       !client->has_job ||
+       memcmp(p+8,server->active_job_id,32)!=0 ||
+       memcmp(p+8,client->sent_job_id,32)!=0)
+    {
+        client->hashrate=0u;
+        return;
+    }
+
+    hashes=read64be(p+40);
+    elapsed_ms=read64be(p+48);
+
+    if(elapsed_ms==0u){
+        client->hashrate=0u;
+        return;
+    }
+
+    quotient=hashes/elapsed_ms;
+    remainder=hashes%elapsed_ms;
+
+    if(quotient>UINT64_MAX/1000u){
+        rate=UINT64_MAX;
+    }
+    else{
+        rate=quotient*1000u;
+
+        {
+            uint64_t extra;
+
+            if(remainder<=UINT64_MAX/1000u){
+                extra=(remainder*1000u)/elapsed_ms;
+            }
+            else{
+                uint64_t scaled_divisor=(elapsed_ms/1000u)+1u;
+                extra=remainder/scaled_divisor;
+                if(extra>999u){extra=999u;}
+            }
+
+            if(UINT64_MAX-rate<extra){
+                rate=UINT64_MAX;
+            }
+            else{
+                rate+=extra;
+            }
+        }
+    }
+
+    client->hashrate=rate;
+}
+
 static void service_client(
     stn_stratum_server *server,
     stn_stratum_client_session *client)
 {
     int socket_fd;
+    size_t frame_size;
 
     if(client==NULL){return;}
 
@@ -1879,25 +2086,48 @@ static void service_client(
 
     socket_fd=(int)client->socket;
 
-    while(client->rx_used<STN_MINER_SUBMIT_SIZE){
-        ssize_t got=recv(
-            socket_fd,
-            client->rx+client->rx_used,
-            STN_MINER_SUBMIT_SIZE-client->rx_used,
-            0);
-
-        if(got>0){
-            client->rx_used+=(size_t)got;
-            continue;
+    for(;;){
+        if(client->rx_used<8u){
+            frame_size=8u;
+        }
+        else if(memcmp(client->rx,STN_MINER_MAGIC,4)!=0 ||
+                client->rx[4]!=STN_MINER_VERSION ||
+                client->rx[6]!=0 ||
+                client->rx[7]!=0)
+        {
+            client_remove(server,client,"invalid frame header");
+            return;
+        }
+        else if(client->rx[5]==STN_MINER_SUBMIT){
+            frame_size=STN_MINER_SUBMIT_SIZE;
+        }
+        else if(client->rx[5]==STN_MINER_HASH_PROGRESS){
+            frame_size=STN_MINER_HASH_PROGRESS_SIZE;
+        }
+        else{
+            client_remove(server,client,"unsupported frame type");
+            return;
         }
 
-        if(got==0){
-            client_remove(
+        while(client->rx_used<frame_size){
+            ssize_t got=recv(
+            socket_fd,
+            client->rx+client->rx_used,
+            frame_size-client->rx_used,
+            0);
+
+            if(got>0){
+                client->rx_used+=(size_t)got;
+                continue;
+            }
+
+            if(got==0){
+                client_remove(
                 server,
                 client,
                 "peer closed");
-            return;
-        }
+                return;
+            }
 
         if(errno==EINTR){
             continue;
@@ -1913,24 +2143,36 @@ static void service_client(
             "receive failed");
 
         return;
-    }
+        }
 
-    if(client->rx_used==STN_MINER_SUBMIT_SIZE){
-        process_submission(server,client);
+        if(client->rx_used<frame_size){
+            return;
+        }
+
+        if(frame_size==STN_MINER_SUBMIT_SIZE){
+            process_submission(server,client);
+        }
+        else{
+            process_hash_progress(server,client);
+        }
 
         {
             stn_stratum_client_session *probe;
+            int still_connected=0;
 
-            for(probe=server->clients;
-                probe!=NULL;
-                probe=probe->next)
-            {
+            for(probe=server->clients;probe!=NULL;probe=probe->next){
                 if(probe==client){
-                    client->rx_used=0u;
+                    still_connected=1;
                     break;
                 }
             }
+
+            if(!still_connected){
+                return;
+            }
         }
+
+        client->rx_used=0u;
     }
 }
 
