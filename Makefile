@@ -6,10 +6,12 @@
 #   make configure
 #   make build
 #   sudo make install
+#   sudo make install-service
 #
 # Optional:
 #   make clean
 #   sudo make uninstall
+#   sudo make uninstall-service
 #
 # Installation prefix may be overridden:
 #   sudo make install PREFIX=/opt/stn-stratum
@@ -18,15 +20,20 @@ CC      ?= gcc
 PREFIX  ?= /usr/local
 BINDIR  ?= $(PREFIX)/bin
 
-CONFIGDIR ?= /etc/stn-stratum
-LOGDIR    ?= /var/log/stratum
+CONFIGDIR  ?= /etc/stn-stratum
+LOGDIR     ?= /var/log/stratum
+SERVICEDIR ?= /etc/systemd/system
 
 BUILD_DIR := build
 TARGET    := $(BUILD_DIR)/stn-stratum
 
 CONFIG_SOURCE := config/chains.json
 CONFIG_TARGET := $(CONFIGDIR)/config.json
-LOG_TARGET    := $(LOGDIR)/stratum.log
+
+LOG_TARGET := $(LOGDIR)/stratum.log
+
+SERVICE_SOURCE := platforms/linux/stn-stratum.service
+SERVICE_TARGET := $(SERVICEDIR)/stn-stratum.service
 
 CPPFLAGS := -D_POSIX_C_SOURCE=200809L -Iincludes -Iplatforms
 CFLAGS   := -std=c17 -Wall -Wextra -Wpedantic -Werror -O2
@@ -46,7 +53,8 @@ SOURCES := $(COMMON_SOURCES) $(LINUX_SOURCES)
 
 OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SOURCES))
 
-.PHONY: all configure build install uninstall clean
+.PHONY: all configure build install install-service \
+	uninstall uninstall-service clean
 
 all: build
 
@@ -57,6 +65,7 @@ configure:
 	@echo "Binary:   $(BINDIR)/stn-stratum"
 	@echo "Config:   $(CONFIG_TARGET)"
 	@echo "Log:      $(LOG_TARGET)"
+	@echo "Service:  $(SERVICE_TARGET)"
 	@mkdir -p $(BUILD_DIR)
 	@echo "Configuration complete."
 
@@ -80,13 +89,13 @@ install: build
 	@echo "Installing STN-Stratum..."
 
 	install -d "$(DESTDIR)$(BINDIR)"
-	install -d "$(DESTDIR)$(CONFIGDIR)"
+	install -d -o root -g stnchain -m 0750 "$(DESTDIR)$(CONFIGDIR)"
 	install -d -o stnchain -g stnchain -m 0755 "$(DESTDIR)$(LOGDIR)"
 
-	install -m 0755 "$(TARGET)" \
+	install -o root -g root -m 0755 "$(TARGET)" \
 		"$(DESTDIR)$(BINDIR)/stn-stratum"
 
-	install -m 0644 "$(CONFIG_SOURCE)" \
+	install -o root -g stnchain -m 0640 "$(CONFIG_SOURCE)" \
 		"$(DESTDIR)$(CONFIG_TARGET)"
 
 	touch "$(DESTDIR)$(LOG_TARGET)"
@@ -97,6 +106,38 @@ install: build
 	@echo "  $(DESTDIR)$(BINDIR)/stn-stratum"
 	@echo "  $(DESTDIR)$(CONFIG_TARGET)"
 	@echo "  $(DESTDIR)$(LOG_TARGET)"
+
+install-service:
+	@echo "Installing STN-Stratum service..."
+
+	install -d "$(DESTDIR)$(SERVICEDIR)"
+	install -o root -g root -m 0644 "$(SERVICE_SOURCE)" \
+		"$(DESTDIR)$(SERVICE_TARGET)"
+
+	@if [ -z "$(DESTDIR)" ]; then \
+		systemctl daemon-reload; \
+	fi
+
+	@echo "Installed:"
+	@echo "  $(DESTDIR)$(SERVICE_TARGET)"
+	@echo ""
+	@echo "Enable and start with:"
+	@echo "  systemctl enable --now stn-stratum.service"
+
+uninstall-service:
+	@echo "Removing STN-Stratum service..."
+
+	@if [ -z "$(DESTDIR)" ]; then \
+		systemctl disable --now stn-stratum.service 2>/dev/null || true; \
+	fi
+
+	rm -f "$(DESTDIR)$(SERVICE_TARGET)"
+
+	@if [ -z "$(DESTDIR)" ]; then \
+		systemctl daemon-reload; \
+	fi
+
+	@echo "STN-Stratum service removed."
 
 uninstall:
 	@echo "Removing STN-Stratum..."

@@ -1073,9 +1073,11 @@ static void log_line(stn_stratum_server *server,const char *format,...)
 
 static int log_open(stn_stratum_server *server)
 {
+	/**
     if(mkdir("logs",0755)!=0 && errno!=EEXIST){
         return 0;
     }
+	*/
 
     server->log_file=fopen(STN_STRATUM_LOG_PATH,"a");
 

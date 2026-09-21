@@ -1,0 +1,15 @@
+[Unit]
+Description=STN-Stratum mining coordination service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stnchain
+Group=stnchain
+ExecStart=/usr/local/bin/stn-stratum
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
