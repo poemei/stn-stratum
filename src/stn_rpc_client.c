@@ -212,7 +212,7 @@ stn_rpc_client_code stn_rpc_client_submit_work(
     size_t response_capacity,
     size_t *written)
 {
-    if(length<68u){
+    if(length<68u+STN_RPC_CLIENT_MINER_IDENTITY_SIZE){
         if(written!=NULL){*written=0;}
         return STN_RPC_CLIENT_INVALID;
     }
