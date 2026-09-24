@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 STN-Labz. All rights reserved. */
 #include "stn_stratum_server.h"
+#include "stn_share_verify.h"
 
 #ifdef _WIN32
 
@@ -561,6 +562,8 @@ static void process_submission(
     uint32_t block_length;
     uint64_t nonce;
     stn_rpc_client_code code;
+    stn_share_class share_class;
+    uint8_t share_hash[32];
 
     if(client==NULL){return;}
     if(!client->address_registered){
@@ -621,6 +624,39 @@ static void process_submission(
         server->active_template_length-68u);
 
     nonce=read64be(p+40);
+
+    {
+        uint8_t share_target[32];
+        const uint8_t *chain_target=
+            server->active_template+68u+STN_MINER_CHAIN_TARGET_OFFSET;
+
+        if(!share_target_from_chain(chain_target,share_target)){
+            log_line(server,"ERROR active Chain target invalid during submit.");
+            client_send_result(server,client,STN_RPC_CLIENT_INVALID);
+            return;
+        }
+
+        share_class=stn_share_classify(
+            server->active_template+68u,
+            block_length,
+            nonce,
+            share_target,
+            chain_target,
+            share_hash);
+
+        if(share_class==STN_SHARE_INVALID){
+            log_line(server,"CLIENT submit rejected: proof exceeds Share Target.");
+            client_send_result(server,client,STN_RPC_CLIENT_REJECTED);
+            return;
+        }
+
+        if(share_class==STN_SHARE_QUALIFYING){
+            log_line(server,"CLIENT qualifying share nonce=%llu verified; Chain share submission not active.",
+                (unsigned long long)nonce);
+            client_send_result(server,client,STN_RPC_CLIENT_OK);
+            return;
+        }
+    }
 
     {
         uint8_t *nonce_field=
@@ -1987,6 +2023,8 @@ static void process_submission(
     uint32_t block_length;
     uint64_t nonce;
     stn_rpc_client_code code;
+    stn_share_class share_class;
+    uint8_t share_hash[32];
 
     if(client==NULL){return;}
 
@@ -2083,6 +2121,39 @@ static void process_submission(
         server->active_template_length);
 
     nonce=read64be(p+40);
+
+    {
+        uint8_t share_target[32];
+        const uint8_t *chain_target=
+            server->active_template+68u+STN_MINER_CHAIN_TARGET_OFFSET;
+
+        if(!share_target_from_chain(chain_target,share_target)){
+            log_line(server,"ERROR active Chain target invalid during submit.");
+            client_send_result(server,client,STN_RPC_CLIENT_INVALID);
+            return;
+        }
+
+        share_class=stn_share_classify(
+            server->active_template+68u,
+            block_length,
+            nonce,
+            share_target,
+            chain_target,
+            share_hash);
+
+        if(share_class==STN_SHARE_INVALID){
+            log_line(server,"CLIENT submit rejected: proof exceeds Share Target.");
+            client_send_result(server,client,STN_RPC_CLIENT_REJECTED);
+            return;
+        }
+
+        if(share_class==STN_SHARE_QUALIFYING){
+            log_line(server,"CLIENT qualifying share nonce=%llu verified; Chain share submission not active.",
+                (unsigned long long)nonce);
+            client_send_result(server,client,STN_RPC_CLIENT_OK);
+            return;
+        }
+    }
 
     {
         uint8_t *nonce_field=
