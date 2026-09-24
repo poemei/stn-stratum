@@ -1014,7 +1014,11 @@ static void refresh_work(stn_stratum_server *server)
                     "retaining server and retrying.");
             }
             server->chain_available=1;
-            clear_work(server);
+            /*
+             * Chain is reachable but has no replacement template yet.
+             * Retain the current immutable job until Chain supplies new work
+             * or explicitly reports it stale.
+             */
             return;
         }
 
@@ -2609,7 +2613,11 @@ static void refresh_work(stn_stratum_server *server)
                     "retaining server and retrying.");
             }
             server->chain_available=1;
-            clear_work(server);
+            /*
+             * Chain is reachable but has no replacement template yet.
+             * Retain the current immutable job until Chain supplies new work
+             * or explicitly reports it stale.
+             */
             return;
         }
 
