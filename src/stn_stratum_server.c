@@ -565,7 +565,8 @@ static void process_submission(
         return;
     }
 
-    payload=(uint8_t *)malloc(server->active_template_length);
+    payload=(uint8_t *)malloc(
+        server->active_template_length+STN_MINER_ADDRESS_LENGTH);
     if(payload==NULL){
         log_line(server,
             "ERROR submission scratch allocation failed: %zu bytes.",
@@ -574,13 +575,19 @@ static void process_submission(
         return;
     }
 
-    memcpy(payload,server->active_template,server->active_template_length);
+    memcpy(payload,server->active_template,68u);
+    memcpy(payload+68u,client->address,STN_MINER_ADDRESS_LENGTH);
+    memcpy(
+        payload+68u+STN_MINER_ADDRESS_LENGTH,
+        server->active_template+68u,
+        server->active_template_length-68u);
 
     nonce=read64be(p+40);
 
     {
         uint8_t *nonce_field=
-            payload+68u+STN_MINER_CHAIN_NONCE_OFFSET;
+            payload+68u+STN_MINER_ADDRESS_LENGTH+
+            STN_MINER_CHAIN_NONCE_OFFSET;
         size_t i;
         uint64_t value=nonce;
 
@@ -593,7 +600,7 @@ static void process_submission(
     code=stn_rpc_client_submit_work(
         &server->chain_rpc,
         payload,
-        server->active_template_length,
+        server->active_template_length+STN_MINER_ADDRESS_LENGTH,
         response,
         sizeof(response),
         &response_length);
@@ -1999,7 +2006,8 @@ static void process_submission(
 
     {
         uint8_t *nonce_field=
-            payload+68u+STN_MINER_CHAIN_NONCE_OFFSET;
+            payload+68u+STN_MINER_ADDRESS_LENGTH+
+            STN_MINER_CHAIN_NONCE_OFFSET;
         size_t i;
         uint64_t value=nonce;
 
@@ -2012,7 +2020,7 @@ static void process_submission(
     code=stn_rpc_client_submit_work(
         &server->chain_rpc,
         payload,
-        server->active_template_length,
+        server->active_template_length+STN_MINER_ADDRESS_LENGTH,
         response,
         sizeof(response),
         &response_length);
