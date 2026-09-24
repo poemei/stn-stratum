@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define STN_RPC_CLIENT_BLOCK_HEADER_SIZE 168u
 #define STN_RPC_CLIENT_MINING_PREFIX_SIZE 68u
 
 static uint64_t read_be(const uint8_t *p,size_t n)
@@ -236,7 +235,7 @@ stn_rpc_client_code stn_rpc_client_submit_share(
     size_t written=0u;
     stn_rpc_client_code code;
 
-    if(payload==NULL || length!=277u || share_id==NULL){
+    if(payload==NULL || length!=STN_RPC_CLIENT_SHARE_SIZE || share_id==NULL){
         return STN_RPC_CLIENT_INVALID;
     }
 
