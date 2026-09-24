@@ -707,10 +707,15 @@ static void process_submission(
 
     client_send_result(server,client,code);
 
-    if(code==STN_RPC_CLIENT_OK ||
-       code==STN_RPC_CLIENT_STALE ||
+    /*
+     * A solved block changes Chain state, but do not invalidate the miner's
+     * session job locally. Chain is authoritative for staleness. Keeping the
+     * sent job until the next template poll prevents a just-submitted solution
+     * from turning an already-in-flight miner SUBMIT into an artificial
+     * Stratum-side stale result.
+     */
+    if(code==STN_RPC_CLIENT_STALE ||
        code==STN_RPC_CLIENT_TRANSPORT ||
-       code==STN_RPC_CLIENT_UNAVAILABLE ||
        code==STN_RPC_CLIENT_PROVIDER ||
        code==STN_RPC_CLIENT_INVALID)
     {
