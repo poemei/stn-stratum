@@ -27,6 +27,20 @@ stn_stratum_status stn_stratum_subscribe(stn_stratum_session *s,uint16_t version
     return STN_STRATUM_OK;
 }
 
+stn_stratum_status stn_stratum_register_identity(
+    stn_stratum_session *s,
+    const uint8_t miner_identity[STN_STRATUM_MINER_IDENTITY_SIZE])
+{
+    if(s==NULL||miner_identity==NULL){return STN_STRATUM_ARGUMENT;}
+    if(memcmp(miner_identity,"stn0_",5u)!=0 ||
+       miner_identity[STN_STRATUM_MINER_IDENTITY_SIZE-1u]!='\0'){
+        return STN_STRATUM_STRUCTURE;
+    }
+    memcpy(s->miner_identity,miner_identity,STN_STRATUM_MINER_IDENTITY_SIZE);
+    s->identity_registered=1;
+    return STN_STRATUM_OK;
+}
+
 /*
  * [AI:GPT-5.6 Sol | 2026-09-07 21:32:50 UTC]
  */
@@ -155,6 +169,10 @@ stn_stratum_status stn_stratum_submit(
     {
         return STN_STRATUM_NO_JOB;
     }
+    if(!s->identity_registered)
+    {
+        return STN_STRATUM_STRUCTURE;
+    }
 
     status=chain->tip(chain->user,tip);
     if(status!=STN_STRATUM_OK)
@@ -192,6 +210,7 @@ stn_stratum_status stn_stratum_submit(
         j->id,
         j->block,
         j->block_length,
+        s->miner_identity,
         nonce);
 
     if(status==STN_STRATUM_OK||
