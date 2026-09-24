@@ -45,7 +45,8 @@ COMMON_SOURCES := \
 	src/stn_chain_config.c \
 	src/stn_chain_rpc_adapter.c \
 	src/stn_stratum.c \
-	src/stn_share_verify.c
+	src/stn_share_verify.c \
+	src/stn_miner_job.c
 
 LINUX_SOURCES := \
 	platforms/linux/stn_rpc_linux.c
@@ -55,7 +56,7 @@ SOURCES := $(COMMON_SOURCES) $(LINUX_SOURCES)
 OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SOURCES))
 
 .PHONY: all configure build install install-service \
-	uninstall uninstall-service clean
+	uninstall uninstall-service clean test-miner-job
 
 all: build
 
@@ -155,3 +156,7 @@ uninstall:
 clean:
 	rm -rf "$(BUILD_DIR)"
 	@echo "Build files removed."
+
+test-miner-job: configure
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_miner_job.c src/stn_miner_job.c -o $(BUILD_DIR)/test-miner-job
+	$(BUILD_DIR)/test-miner-job
