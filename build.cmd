@@ -3,6 +3,8 @@ setlocal
 
 if not exist build mkdir build
 
+if /i "%~1"=="test-miner-job" goto test_miner_job
+
 where cl >nul 2>nul
 if errorlevel 1 (
     echo ERROR: Microsoft cl.exe not found.
@@ -27,6 +29,24 @@ if errorlevel 1 (
     exit /b 1
 )
 
+goto build_success
+
+:test_miner_job
+where cl >nul 2>nul
+if errorlevel 1 (
+    echo ERROR: Microsoft cl.exe not found.
+    echo Run this from a Visual Studio Developer Command Prompt.
+    exit /b 1
+)
+cl /nologo /O2 /W4 /std:c17 /Iincludes /DSTN_MINER_JOB_TEST_MAIN ^
+    tests\test_miner_job.c ^
+    src\stn_miner_job.c ^
+    /Fe:build\test-miner-job.exe
+if errorlevel 1 exit /b 1
+build\test-miner-job.exe
+exit /b %errorlevel%
+
+:build_success
 echo.
 echo BUILD SUCCESSFUL
 echo build\stn-stratum.exe
