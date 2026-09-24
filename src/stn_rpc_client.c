@@ -144,6 +144,7 @@ static stn_rpc_client_code call(
 
     if((method==STN_RPC_CLIENT_INFO && response_length!=184u) ||
        (method==STN_RPC_CLIENT_SUBMIT_WORK && response_length!=80u) ||
+       (method==STN_RPC_CLIENT_SUBMIT_SHARE && response_length!=32u) ||
        (method==STN_RPC_CLIENT_MINING_TEMPLATE &&
         (response_length<
              STN_RPC_CLIENT_MINING_PREFIX_SIZE+
@@ -225,4 +226,31 @@ stn_rpc_client_code stn_rpc_client_submit_work(
         response_payload,
         response_capacity,
         written);
+}
+stn_rpc_client_code stn_rpc_client_submit_share(
+    stn_rpc_client *client,
+    const uint8_t *payload,
+    size_t length,
+    uint8_t share_id[32])
+{
+    size_t written=0u;
+    stn_rpc_client_code code;
+
+    if(payload==NULL || length!=109u || share_id==NULL){
+        return STN_RPC_CLIENT_INVALID;
+    }
+
+    code=call(
+        client,
+        STN_RPC_CLIENT_SUBMIT_SHARE,
+        payload,
+        length,
+        share_id,
+        32u,
+        &written);
+
+    if(code==STN_RPC_CLIENT_OK && written!=32u){
+        return STN_RPC_CLIENT_INVALID;
+    }
+    return code;
 }
