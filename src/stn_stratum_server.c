@@ -58,6 +58,36 @@ static void write32be(uint8_t *p,uint32_t v)
     p[3]=(uint8_t)v;
 }
 
+static int share_target_from_chain(const uint8_t chain[32],uint8_t share[32])
+{
+    uint8_t scaled[33]={0};
+    unsigned carry=0u;
+    size_t i;
+
+    if(chain==NULL || share==NULL){return 0;}
+    if(chain[0]>=0x80u){return 0;}
+    for(i=0u;i<32u;i++){carry|=chain[i];}
+    if(carry==0u){return 0;}
+
+    carry=0u;
+    for(i=32u;i!=0u;){
+        unsigned v;
+        --i;
+        v=(unsigned)chain[i]*STN_MINER_SHARE_FACTOR+carry;
+        scaled[i+1u]=(uint8_t)(v&0xffu);
+        carry=v>>8;
+    }
+    scaled[0]=(uint8_t)carry;
+
+    if(scaled[0]!=0u || scaled[1]>=0x80u){
+        memset(share,0xff,32u);
+        share[0]=0x7fu;
+    }else{
+        memcpy(share,scaled+1u,32u);
+    }
+    return 1;
+}
+
 static void timestamp_utc(char out[32])
 {
     time_t now=time(NULL);
@@ -306,14 +336,22 @@ static int client_send_job(
         return 0;
     }
 
+    if(!share_target_from_chain(
+            server->active_template+68u+STN_MINER_CHAIN_TARGET_OFFSET,
+            header+STN_MINER_JOB_SHARE_TARGET_OFFSET))
+    {
+        log_line(server,"ERROR active Chain target invalid for share derivation.");
+        return 0;
+    }
+
     memcpy(
-        header+40,
+        header+STN_MINER_JOB_CHAIN_TARGET_OFFSET,
         server->active_template+68u+STN_MINER_CHAIN_TARGET_OFFSET,
         32u);
 
-    write32be(header+72,block_length);
+    write32be(header+STN_MINER_JOB_BLOCK_LENGTH_OFFSET,block_length);
     memcpy(
-        header+76,
+        header+STN_MINER_JOB_INITIAL_NONCE_OFFSET,
         server->active_template+68u+STN_MINER_CHAIN_NONCE_OFFSET,
         8u);
 
