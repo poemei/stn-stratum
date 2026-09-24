@@ -44,7 +44,8 @@ COMMON_SOURCES := \
 	src/stn_rpc_client.c \
 	src/stn_chain_config.c \
 	src/stn_chain_rpc_adapter.c \
-	src/stn_stratum.c
+	src/stn_stratum.c \
+	src/stn_share_verify.c
 
 LINUX_SOURCES := \
 	platforms/linux/stn_rpc_linux.c
