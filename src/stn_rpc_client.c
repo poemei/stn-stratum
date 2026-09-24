@@ -236,7 +236,7 @@ stn_rpc_client_code stn_rpc_client_submit_share(
     size_t written=0u;
     stn_rpc_client_code code;
 
-    if(payload==NULL || length!=109u || share_id==NULL){
+    if(payload==NULL || length!=277u || share_id==NULL){
         return STN_RPC_CLIENT_INVALID;
     }
 
