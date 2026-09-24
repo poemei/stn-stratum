@@ -16,6 +16,7 @@ cl /nologo /O2 /W4 /std:c17 /Iincludes /Iplatforms/windows ^
     src\stn_rpc_client.c ^
     src\stn_chain_config.c ^
     src\stn_share_verify.c ^
+    src\stn_miner_job.c ^
     platforms\windows\stn_rpc_win32.c ^
     /Fe:build\stn-stratum.exe ^
     /link Ws2_32.lib
