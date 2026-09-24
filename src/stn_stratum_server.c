@@ -651,9 +651,40 @@ static void process_submission(
         }
 
         if(share_class==STN_SHARE_QUALIFYING){
-            log_line(server,"CLIENT qualifying share nonce=%llu verified; Chain share submission not active.",
-                (unsigned long long)nonce);
-            client_send_result(server,client,STN_RPC_CLIENT_OK);
+            uint8_t share_payload[109];
+            uint8_t share_id[32];
+            stn_rpc_client_code share_code;
+            char share_hex[17];
+
+            memcpy(share_payload,server->active_job_id,32u);
+            memcpy(share_payload+32u,client->address,STN_MINER_ADDRESS_LENGTH);
+            {
+                size_t i;
+                uint64_t value=nonce;
+                for(i=0u;i<8u;i++){
+                    share_payload[108u-i]=(uint8_t)(value&0xffu);
+                    value>>=8;
+                }
+            }
+
+            share_code=stn_rpc_client_submit_share(
+                &server->chain_rpc,
+                share_payload,
+                sizeof(share_payload),
+                share_id);
+
+            if(share_code==STN_RPC_CLIENT_OK){
+                hex8(share_hex,share_id);
+                log_line(server,
+                    "CLIENT qualifying share nonce=%llu Chain verified share=%s....",
+                    (unsigned long long)nonce,share_hex);
+            }else{
+                log_line(server,
+                    "CLIENT qualifying share nonce=%llu Chain result=%d.",
+                    (unsigned long long)nonce,(int)share_code);
+            }
+
+            client_send_result(server,client,share_code);
             return;
         }
     }
@@ -2148,9 +2179,40 @@ static void process_submission(
         }
 
         if(share_class==STN_SHARE_QUALIFYING){
-            log_line(server,"CLIENT qualifying share nonce=%llu verified; Chain share submission not active.",
-                (unsigned long long)nonce);
-            client_send_result(server,client,STN_RPC_CLIENT_OK);
+            uint8_t share_payload[109];
+            uint8_t share_id[32];
+            stn_rpc_client_code share_code;
+            char share_hex[17];
+
+            memcpy(share_payload,server->active_job_id,32u);
+            memcpy(share_payload+32u,client->address,STN_MINER_ADDRESS_LENGTH);
+            {
+                size_t i;
+                uint64_t value=nonce;
+                for(i=0u;i<8u;i++){
+                    share_payload[108u-i]=(uint8_t)(value&0xffu);
+                    value>>=8;
+                }
+            }
+
+            share_code=stn_rpc_client_submit_share(
+                &server->chain_rpc,
+                share_payload,
+                sizeof(share_payload),
+                share_id);
+
+            if(share_code==STN_RPC_CLIENT_OK){
+                hex8(share_hex,share_id);
+                log_line(server,
+                    "CLIENT qualifying share nonce=%llu Chain verified share=%s....",
+                    (unsigned long long)nonce,share_hex);
+            }else{
+                log_line(server,
+                    "CLIENT qualifying share nonce=%llu Chain result=%d.",
+                    (unsigned long long)nonce,(int)share_code);
+            }
+
+            client_send_result(server,client,share_code);
             return;
         }
     }
