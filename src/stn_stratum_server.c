@@ -714,12 +714,16 @@ static void process_submission(
      * from turning an already-in-flight miner SUBMIT into an artificial
      * Stratum-side stale result.
      */
-    if(code==STN_RPC_CLIENT_STALE ||
-       code==STN_RPC_CLIENT_TRANSPORT ||
-       code==STN_RPC_CLIENT_PROVIDER ||
-       code==STN_RPC_CLIENT_INVALID)
+    /*
+     * Submission results do not invalidate Stratum's active job locally.
+     * Chain owns work lifetime.  The polling path replaces work when Chain
+     * publishes a new template or explicitly reports the current work stale.
+     * Keeping the job here also prevents miners from being stranded in
+     * WAIT_JOB while Chain transitions to replacement work.
+     */
+    if(code==STN_RPC_CLIENT_TRANSPORT)
     {
-        clear_work(server);
+        server->chain_available=0;
     }
 
     if(code==STN_RPC_CLIENT_TRANSPORT ||
