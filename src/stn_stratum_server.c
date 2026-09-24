@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 STN-Labz. All rights reserved. */
 #include "stn_stratum_server.h"
 #include "stn_share_verify.h"
+#include "stn_miner_job.h"
 
 #ifdef _WIN32
 
@@ -322,39 +323,12 @@ static int client_send_job(
     socket=(SOCKET)client->socket;
     if(socket==INVALID_SOCKET){return 0;}
 
-    block_length=(uint32_t)(server->active_template_length-68u);
-
-    memset(header,0,sizeof(header));
-    memcpy(header,STN_MINER_MAGIC,4);
-    header[4]=STN_MINER_VERSION;
-    header[5]=STN_MINER_JOB;
-    memcpy(header+8,server->active_job_id,32);
-
-    if(block_length<STN_MINER_CHAIN_HEADER_SIZE){
-        log_line(server,
-            "ERROR active Chain template block too small: %u bytes.",
-            (unsigned)block_length);
-        return 0;
-    }
-
-    if(!share_target_from_chain(
-            server->active_template+68u+STN_MINER_CHAIN_TARGET_OFFSET,
-            header+STN_MINER_JOB_SHARE_TARGET_OFFSET))
+    if(!stn_miner_job_build(server->active_template,
+            server->active_template_length,header,&block_length))
     {
-        log_line(server,"ERROR active Chain target invalid for share derivation.");
+        log_line(server,"ERROR active Chain template cannot form Miner JOB.");
         return 0;
     }
-
-    memcpy(
-        header+STN_MINER_JOB_CHAIN_TARGET_OFFSET,
-        server->active_template+68u+STN_MINER_CHAIN_TARGET_OFFSET,
-        32u);
-
-    write32be(header+STN_MINER_JOB_BLOCK_LENGTH_OFFSET,block_length);
-    memcpy(
-        header+STN_MINER_JOB_INITIAL_NONCE_OFFSET,
-        server->active_template+68u+STN_MINER_CHAIN_NONCE_OFFSET,
-        8u);
 
     if(!send_all(socket,header,sizeof(header)) ||
        !send_all(socket,server->active_template+68u,block_length))
@@ -1762,45 +1736,12 @@ static int client_send_job(
         return 0;
     }
 
-    block_length=(uint32_t)(server->active_template_length-68u);
-
-    memset(header,0,sizeof(header));
-    memcpy(header,STN_MINER_MAGIC,4);
-    header[4]=STN_MINER_VERSION;
-    header[5]=STN_MINER_JOB;
-    memcpy(header+8,server->active_job_id,32);
-
-    if(block_length<STN_MINER_CHAIN_HEADER_SIZE){
-        log_line(
-            server,
-            "ERROR active Chain template block too small: %u bytes.",
-            (unsigned)block_length);
-        return 0;
-    }
-
-    if(!share_target_from_chain(
-            server->active_template+68u+STN_MINER_CHAIN_TARGET_OFFSET,
-            header+STN_MINER_JOB_SHARE_TARGET_OFFSET))
+    if(!stn_miner_job_build(server->active_template,
+            server->active_template_length,header,&block_length))
     {
-        log_line(
-            server,
-            "ERROR active Chain target invalid for share derivation.");
+        log_line(server,"ERROR active Chain template cannot form Miner JOB.");
         return 0;
     }
-
-    memcpy(
-        header+STN_MINER_JOB_CHAIN_TARGET_OFFSET,
-        server->active_template+68u+STN_MINER_CHAIN_TARGET_OFFSET,
-        32u);
-
-    write32be(
-        header+STN_MINER_JOB_BLOCK_LENGTH_OFFSET,
-        block_length);
-
-    memcpy(
-        header+STN_MINER_JOB_INITIAL_NONCE_OFFSET,
-        server->active_template+68u+STN_MINER_CHAIN_NONCE_OFFSET,
-        8u);
 
     if(!send_all(socket_fd,header,sizeof(header)) ||
        !send_all(
