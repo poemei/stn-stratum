@@ -14,6 +14,7 @@
 #define STN_RPC_CLIENT_MINING_TEMPLATE 0x2002u
 #define STN_RPC_CLIENT_INFO 0x0001u
 #define STN_RPC_CLIENT_SUBMIT_WORK     0x2003u
+#define STN_RPC_CLIENT_SUBMIT_SHARE    0x2004u
 
 typedef enum stn_rpc_client_code {
     STN_RPC_CLIENT_OK = 0,
@@ -66,5 +67,11 @@ stn_rpc_client_code stn_rpc_client_submit_work(
     uint8_t *response_payload,
     size_t response_capacity,
     size_t *written);
+
+stn_rpc_client_code stn_rpc_client_submit_share(
+    stn_rpc_client *client,
+    const uint8_t *payload,
+    size_t length,
+    uint8_t share_id[32]);
 
 #endif
