@@ -671,8 +671,13 @@ static void process_submission(
             }
 
             client_send_result(server,client,share_code);
-            if(share_code==STN_RPC_CLIENT_OK ||
-               share_code==STN_RPC_CLIENT_STALE ||
+            /*
+             * An accepted qualifying share does not consume the active Work ID.
+             * Other miners, and this miner, may continue producing independent
+             * qualifying evidence against the same immutable Chain work.
+             * Clear only when Chain says the work/session can no longer be used.
+             */
+            if(share_code==STN_RPC_CLIENT_STALE ||
                share_code==STN_RPC_CLIENT_TRANSPORT ||
                share_code==STN_RPC_CLIENT_UNAVAILABLE ||
                share_code==STN_RPC_CLIENT_PROVIDER ||
@@ -2205,8 +2210,13 @@ static void process_submission(
             }
 
             client_send_result(server,client,share_code);
-            if(share_code==STN_RPC_CLIENT_OK ||
-               share_code==STN_RPC_CLIENT_STALE ||
+            /*
+             * An accepted qualifying share does not consume the active Work ID.
+             * Other miners, and this miner, may continue producing independent
+             * qualifying evidence against the same immutable Chain work.
+             * Clear only when Chain says the work/session can no longer be used.
+             */
+            if(share_code==STN_RPC_CLIENT_STALE ||
                share_code==STN_RPC_CLIENT_TRANSPORT ||
                share_code==STN_RPC_CLIENT_UNAVAILABLE ||
                share_code==STN_RPC_CLIENT_PROVIDER ||
