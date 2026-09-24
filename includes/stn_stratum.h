@@ -7,6 +7,7 @@
 
 #define STN_STRATUM_PROTOCOL_VERSION 1u
 #define STN_STRATUM_DUPLICATE_CAPACITY 64u
+#define STN_STRATUM_MINER_IDENTITY_SIZE 69u
 
 /*
  * Stratum owns its protocol buffer capacity. The chain adapter remains
@@ -69,6 +70,7 @@ typedef stn_stratum_status (*stn_stratum_submit_fn)(
     const uint8_t job_id[32],
     const uint8_t *block,
     size_t block_length,
+    const uint8_t miner_identity[STN_STRATUM_MINER_IDENTITY_SIZE],
     uint64_t nonce);
 
 typedef struct stn_stratum_chain {
@@ -83,6 +85,8 @@ typedef struct stn_stratum_session {
     uint64_t session_id;
     uint64_t submitted[STN_STRATUM_DUPLICATE_CAPACITY];
     size_t submitted_count;
+    uint8_t miner_identity[STN_STRATUM_MINER_IDENTITY_SIZE];
+    int identity_registered;
     int subscribed;
 } stn_stratum_session;
 
@@ -93,6 +97,10 @@ void stn_stratum_session_init(
 stn_stratum_status stn_stratum_subscribe(
     stn_stratum_session *session,
     uint16_t version);
+
+stn_stratum_status stn_stratum_register_identity(
+    stn_stratum_session *session,
+    const uint8_t miner_identity[STN_STRATUM_MINER_IDENTITY_SIZE]);
 
 stn_stratum_status stn_stratum_job_set(
     stn_stratum_job *job,
