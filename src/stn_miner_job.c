@@ -9,13 +9,32 @@ static void write32be(uint8_t out[4],uint32_t value)
 }
 static int share_target_from_chain(const uint8_t chain[32],uint8_t share[32])
 {
-    uint32_t carry=0u;size_t i;
+    uint8_t scaled[33]={0};
+    unsigned carry=0u;
+    size_t i;
+
     if(chain==NULL||share==NULL)return 0;
+
     for(i=32u;i!=0u;--i){
-        uint32_t value=(uint32_t)chain[i-1u]*STN_MINER_SHARE_FACTOR+carry;
-        share[i-1u]=(uint8_t)(value&0xffu);carry=value>>8;
+        unsigned value=(unsigned)chain[i-1u]*STN_MINER_SHARE_FACTOR+carry;
+        scaled[i]=(uint8_t)(value&0xffu);
+        carry=value>>8;
     }
-    if(carry!=0u){memset(share,0xff,32u);}
+    scaled[0]=(uint8_t)carry;
+
+    /*
+     * Match the Chain economic rule exactly:
+     *     min(MAX_TARGET, chain_target * STN_MINER_SHARE_FACTOR)
+     * MAX_TARGET is 2^255-1.  A carry into scaled[0], or bit 255 becoming
+     * set in the 256-bit product, means the product exceeds MAX_TARGET.
+     */
+    if(scaled[0]!=0u||scaled[1]>=0x80u){
+        memset(share,0xff,32u);
+        share[0]=0x7fu;
+    }else{
+        memcpy(share,scaled+1u,32u);
+    }
+
     return 1;
 }
 int stn_miner_job_build(const uint8_t *t,size_t n,uint8_t h[STN_MINER_JOB_HEADER_SIZE],uint32_t *block_length)
