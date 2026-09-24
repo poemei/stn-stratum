@@ -606,23 +606,6 @@ static void process_submission(
         return;
     }
 
-    payload=(uint8_t *)malloc(
-        server->active_template_length+STN_MINER_ADDRESS_LENGTH);
-    if(payload==NULL){
-        log_line(server,
-            "ERROR submission scratch allocation failed: %zu bytes.",
-            server->active_template_length);
-        client_send_result(server,client,STN_RPC_CLIENT_PROVIDER);
-        return;
-    }
-
-    memcpy(payload,server->active_template,68u);
-    memcpy(payload+68u,client->address,STN_MINER_ADDRESS_LENGTH);
-    memcpy(
-        payload+68u+STN_MINER_ADDRESS_LENGTH,
-        server->active_template+68u,
-        server->active_template_length-68u);
-
     nonce=read64be(p+40);
 
     {
@@ -651,7 +634,7 @@ static void process_submission(
         }
 
         if(share_class==STN_SHARE_QUALIFYING){
-            uint8_t share_payload[109];
+            uint8_t share_payload[277];
             uint8_t share_id[32];
             stn_rpc_client_code share_code;
             char share_hex[17];
@@ -666,6 +649,9 @@ static void process_submission(
                     value>>=8;
                 }
             }
+            memcpy(share_payload+109u,
+                server->active_template+68u,
+                STN_MINER_CHAIN_HEADER_SIZE);
 
             share_code=stn_rpc_client_submit_share(
                 &server->chain_rpc,
@@ -688,6 +674,23 @@ static void process_submission(
             return;
         }
     }
+
+    payload=(uint8_t *)malloc(
+        server->active_template_length+STN_MINER_ADDRESS_LENGTH);
+    if(payload==NULL){
+        log_line(server,
+            "ERROR submission scratch allocation failed: %zu bytes.",
+            server->active_template_length);
+        client_send_result(server,client,STN_RPC_CLIENT_PROVIDER);
+        return;
+    }
+
+    memcpy(payload,server->active_template,68u);
+    memcpy(payload+68u,client->address,STN_MINER_ADDRESS_LENGTH);
+    memcpy(
+        payload+68u+STN_MINER_ADDRESS_LENGTH,
+        server->active_template+68u,
+        server->active_template_length-68u);
 
     {
         uint8_t *nonce_field=
