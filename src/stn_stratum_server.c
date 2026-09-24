@@ -671,6 +671,14 @@ static void process_submission(
             }
 
             client_send_result(server,client,share_code);
+            if(share_code==STN_RPC_CLIENT_OK ||
+               share_code==STN_RPC_CLIENT_STALE ||
+               share_code==STN_RPC_CLIENT_TRANSPORT ||
+               share_code==STN_RPC_CLIENT_UNAVAILABLE ||
+               share_code==STN_RPC_CLIENT_PROVIDER ||
+               share_code==STN_RPC_CLIENT_INVALID){
+                clear_work(server);
+            }
             return;
         }
     }
@@ -2197,6 +2205,14 @@ static void process_submission(
             }
 
             client_send_result(server,client,share_code);
+            if(share_code==STN_RPC_CLIENT_OK ||
+               share_code==STN_RPC_CLIENT_STALE ||
+               share_code==STN_RPC_CLIENT_TRANSPORT ||
+               share_code==STN_RPC_CLIENT_UNAVAILABLE ||
+               share_code==STN_RPC_CLIENT_PROVIDER ||
+               share_code==STN_RPC_CLIENT_INVALID){
+                clear_work(server);
+            }
             return;
         }
     }
