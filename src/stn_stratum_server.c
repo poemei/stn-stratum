@@ -634,7 +634,7 @@ static void process_submission(
         }
 
         if(share_class==STN_SHARE_QUALIFYING){
-            uint8_t share_payload[277];
+            uint8_t share_payload[STN_RPC_CLIENT_SHARE_SIZE];
             uint8_t share_id[32];
             stn_rpc_client_code share_code;
             char share_hex[17];
@@ -649,7 +649,7 @@ static void process_submission(
                     value>>=8;
                 }
             }
-            memcpy(share_payload+109u,
+            memcpy(share_payload+STN_RPC_CLIENT_SHARE_PREFIX_SIZE,
                 server->active_template+68u,
                 STN_MINER_CHAIN_HEADER_SIZE);
 
@@ -2160,7 +2160,7 @@ static void process_submission(
         }
 
         if(share_class==STN_SHARE_QUALIFYING){
-            uint8_t share_payload[277];
+            uint8_t share_payload[STN_RPC_CLIENT_SHARE_SIZE];
             uint8_t share_id[32];
             stn_rpc_client_code share_code;
             char share_hex[17];
@@ -2175,7 +2175,7 @@ static void process_submission(
                     value>>=8;
                 }
             }
-            memcpy(share_payload+109u,
+            memcpy(share_payload+STN_RPC_CLIENT_SHARE_PREFIX_SIZE,
                 server->active_template+68u,
                 STN_MINER_CHAIN_HEADER_SIZE);
 
