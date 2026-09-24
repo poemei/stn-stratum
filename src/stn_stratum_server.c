@@ -2015,6 +2015,11 @@ static void process_submission(
     uint8_t share_hash[32];
 
     if(client==NULL){return;}
+    if(!client->address_registered){
+        log_line(server,"CLIENT SUBMIT before ADDRESS.");
+        client_remove(server,client,"ADDRESS required");
+        return;
+    }
 
     p=client->rx;
 
