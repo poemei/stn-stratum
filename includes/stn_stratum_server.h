@@ -14,6 +14,9 @@
 #ifdef _WIN32
 #include "stn_rpc_win32.h"
 #elif defined(__linux__)
+#include <errno.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 #include "stn_rpc_linux.h"
 #else
 #error Unsupported STN-Stratum platform
@@ -32,6 +35,33 @@
 #elif defined(__linux__)
 #define STN_STRATUM_CHAIN_CONFIG "/etc/stn-stratum/config.json"
 #define STN_STRATUM_LOG_PATH "/var/log/stratum/stratum.log"
+#endif
+
+/*
+ * Linux server receive operations must never obtain an unbounded blocking
+ * position in the primary Stratum service loop. Miner sockets are already
+ * configured nonblocking; this wrapper also bounds accepted telemetry
+ * sockets before telemetry_service() has an opportunity to wait on them.
+ *
+ * A telemetry connection with no readable request bytes therefore produces
+ * EAGAIN/EWOULDBLOCK and is closed by the existing telemetry path instead of
+ * blocking miner servicing, Chain polling, work refresh, or later clients.
+ */
+#ifdef __linux__
+static inline ssize_t stn_stratum_recv_nonblocking(
+    int socket_fd,
+    void *buffer,
+    size_t length,
+    int flags)
+{
+    return recv(
+        socket_fd,
+        buffer,
+        length,
+        flags|MSG_DONTWAIT);
+}
+#define recv(socket_fd,buffer,length,flags) \
+    stn_stratum_recv_nonblocking((socket_fd),(buffer),(length),(flags))
 #endif
 
 typedef struct stn_stratum_client_session stn_stratum_client_session;
