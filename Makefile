@@ -56,7 +56,7 @@ SOURCES := $(COMMON_SOURCES) $(LINUX_SOURCES)
 OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SOURCES))
 
 .PHONY: all configure build install install-service \
-	uninstall uninstall-service clean test-miner-job test-telemetry
+	uninstall uninstall-service clean test-miner-job test-job-refresh test-telemetry
 
 all: build
 
@@ -159,6 +159,10 @@ clean:
 test-miner-job: configure
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_miner_job.c src/stn_miner_job.c -o $(BUILD_DIR)/test-miner-job
 	$(BUILD_DIR)/test-miner-job
+
+test-job-refresh: configure
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_job_refresh.c src/stn_stratum.c -o $(BUILD_DIR)/test-job-refresh
+	$(BUILD_DIR)/test-job-refresh
 
 test-telemetry: configure
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_telemetry.c -o $(BUILD_DIR)/test-telemetry
