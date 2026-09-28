@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #define STN_INVALID_SOCKET_FD (-1)
+#define STN_RPC_IO_TIMEOUT_SECONDS 60
 
 static uint32_t read32be(const uint8_t *p)
 {
@@ -86,7 +87,13 @@ static int connect_socket(stn_rpc_linux *t)
         return 0;
     }
 
-    timeout.tv_sec=5;
+    /*
+     * Chain RPC performs deterministic accepted-history reconstruction for
+     * several read paths. A healthy response can therefore exceed the old
+     * five-second transport allowance. Keep the transport bounded, but do not
+     * classify a slow healthy Chain as disconnected before it can answer.
+     */
+    timeout.tv_sec=STN_RPC_IO_TIMEOUT_SECONDS;
     timeout.tv_usec=0;
 
     if(setsockopt(
