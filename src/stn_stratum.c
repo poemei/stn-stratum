@@ -82,7 +82,6 @@ stn_stratum_status stn_stratum_job_refresh(
     stn_stratum_job *job,
     const stn_stratum_chain *chain)
 {
-    uint8_t live_tip[32];
     uint8_t base_tip[32];
     uint8_t job_id[32];
     uint8_t target[32];
@@ -91,18 +90,18 @@ stn_stratum_status stn_stratum_job_refresh(
     size_t written;
     stn_stratum_status status;
 
-    if(job==NULL||chain==NULL||chain->tip==NULL||
-       chain->template_get==NULL)
+    if(job==NULL||chain==NULL||chain->template_get==NULL)
     {
         return STN_STRATUM_ARGUMENT;
     }
 
-    status=chain->tip(chain->user,live_tip);
-    if(status!=STN_STRATUM_OK)
-    {
-        return STN_STRATUM_PROVIDER;
-    }
-
+    /*
+     * A MINING_TEMPLATE response is one canonical Chain snapshot. Its
+     * base_tip, Work ID, target, height, and block candidate belong together.
+     * Do not issue a second MINING_TEMPLATE merely to rediscover the tip:
+     * doing so creates an artificial race between two independently valid
+     * snapshots and can leave miners without work while Chain is healthy.
+     */
     written=0u;
     height=0u;
     status=chain->template_get(
@@ -120,11 +119,6 @@ stn_stratum_status stn_stratum_job_refresh(
         return status==STN_STRATUM_CAPACITY
             ? STN_STRATUM_CAPACITY
             : STN_STRATUM_PROVIDER;
-    }
-
-    if(memcmp(base_tip,live_tip,32)!=0)
-    {
-        return STN_STRATUM_STALE;
     }
 
     return stn_stratum_job_set(
