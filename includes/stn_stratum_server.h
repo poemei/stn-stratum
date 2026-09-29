@@ -11,6 +11,7 @@
 #include "stn_miner_protocol.h"
 #include "stn_chain_config.h"
 #include "stn_telemetry.h"
+#include "stn_client_session.h"
 
 #ifdef _WIN32
 #include "stn_rpc_win32.h"
@@ -40,7 +41,7 @@
 #define STN_STRATUM_LOG_PATH "/var/log/stratum/stratum.log"
 #endif
 
-typedef struct stn_stratum_client_session stn_stratum_client_session;
+typedef stn_client_session stn_stratum_client_session;
 
 typedef struct stn_stratum_server {
     stn_chain_config chain_config;
