@@ -62,8 +62,12 @@ typedef struct stn_stratum_server {
     size_t active_template_length;
     int have_work;
 
-    /* Mining mode is assigned by the listener that accepted the session.
-       18475 is Pool; 18477 is Solo. */
+    /* Legacy pool socket remains live until stn_stratum_server.c completes
+       the atomic crossover to the qualified mining-listener module. */
+    uintptr_t listen_socket;
+
+    /* Qualified modular listeners. Mining mode is assigned by the listener
+       accepting the session: 18475 Pool, 18477 Solo. */
     stn_mining_listener pool_listener;
     stn_mining_listener solo_listener;
 
