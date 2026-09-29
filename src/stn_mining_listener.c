@@ -107,3 +107,57 @@ void stn_mining_listener_close(stn_mining_listener *listener)
 
     listener->socket=STN_MINING_INVALID_SOCKET;
 }
+
+int stn_mining_listener_accept(
+    const stn_mining_listener *listener,
+    stn_mining_socket *client_socket)
+{
+    stn_mining_socket accepted;
+
+    if(client_socket!=NULL){
+        *client_socket=STN_MINING_INVALID_SOCKET;
+    }
+
+    if(listener==NULL || client_socket==NULL ||
+       listener->socket==STN_MINING_INVALID_SOCKET)
+    {
+        return -1;
+    }
+
+#ifdef _WIN32
+    accepted=accept(listener->socket,NULL,NULL);
+    if(accepted==INVALID_SOCKET){
+        int error=WSAGetLastError();
+        if(error==WSAEWOULDBLOCK){return 0;}
+        return -1;
+    }
+
+    {
+        u_long nonblocking=1u;
+        if(ioctlsocket(accepted,FIONBIO,&nonblocking)!=0){
+            closesocket(accepted);
+            return -1;
+        }
+    }
+#else
+    do{
+        accepted=accept(listener->socket,NULL,NULL);
+    }while(accepted<0 && errno==EINTR);
+
+    if(accepted<0){
+        if(errno==EAGAIN || errno==EWOULDBLOCK){return 0;}
+        return -1;
+    }
+
+    {
+        int flags=fcntl(accepted,F_GETFL,0);
+        if(flags<0 || fcntl(accepted,F_SETFL,flags|O_NONBLOCK)!=0){
+            (void)close(accepted);
+            return -1;
+        }
+    }
+#endif
+
+    *client_socket=accepted;
+    return 1;
+}
