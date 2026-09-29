@@ -28,4 +28,14 @@ void stn_mining_listener_init(
 int stn_mining_listener_open(stn_mining_listener *listener);
 void stn_mining_listener_close(stn_mining_listener *listener);
 
+/*
+ * Accept one client from this listener without blocking.
+ * Returns 1 when a client was accepted, 0 when no client is pending,
+ * and -1 for a listener/accept failure. The listener's mode is the
+ * authoritative mining mode for the accepted session.
+ */
+int stn_mining_listener_accept(
+    const stn_mining_listener *listener,
+    stn_mining_socket *client_socket);
+
 #endif
