@@ -10,6 +10,7 @@
 #include "stn_rpc_client.h"
 #include "stn_miner_protocol.h"
 #include "stn_chain_config.h"
+#include "stn_telemetry.h"
 
 #ifdef _WIN32
 #include "stn_rpc_win32.h"
@@ -39,33 +40,6 @@
 #define STN_STRATUM_LOG_PATH "/var/log/stratum/stratum.log"
 #endif
 
-/*
- * Linux server receive operations must never obtain an unbounded blocking
- * position in the primary Stratum service loop. Miner sockets are already
- * configured nonblocking; this wrapper also bounds accepted telemetry
- * sockets before telemetry_service() has an opportunity to wait on them.
- *
- * A telemetry connection with no readable request bytes therefore produces
- * EAGAIN/EWOULDBLOCK and is closed by the existing telemetry path instead of
- * blocking miner servicing, Chain polling, work refresh, or later clients.
- */
-#ifdef __linux__
-static inline ssize_t stn_stratum_recv_nonblocking(
-    int socket_fd,
-    void *buffer,
-    size_t length,
-    int flags)
-{
-    return recv(
-        socket_fd,
-        buffer,
-        length,
-        flags|MSG_DONTWAIT);
-}
-#define recv(socket_fd,buffer,length,flags) \
-    stn_stratum_recv_nonblocking((socket_fd),(buffer),(length),(flags))
-#endif
-
 typedef struct stn_stratum_client_session stn_stratum_client_session;
 
 typedef struct stn_stratum_server {
@@ -88,7 +62,10 @@ typedef struct stn_stratum_server {
 
     uintptr_t listen_socket;
     uintptr_t solo_socket;
-    uintptr_t telemetry_socket;
+
+    /* [AI:GPT-5.6 Sol | 2026-09-29 00:00:00 UTC] */
+    stn_telemetry_service telemetry;
+    /* [End AI:GPT-5.6 Sol] */
 
     stn_stratum_client_session *clients;
     size_t client_count;
