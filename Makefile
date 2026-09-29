@@ -47,7 +47,8 @@ COMMON_SOURCES := \
 	src/stn_stratum.c \
 	src/stn_share_verify.c \
 	src/stn_miner_job.c \
-	src/stn_service_mode.c
+	src/stn_service_mode.c \
+	src/stn_mining_listener.c
 
 LINUX_SOURCES := \
 	platforms/linux/stn_rpc_linux.c
@@ -58,7 +59,7 @@ OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SOURCES))
 
 .PHONY: all configure build install install-service \
 	uninstall uninstall-service clean test-miner-job test-job-refresh \
-	test-telemetry test-service-ports test-service-mode
+	test-telemetry test-service-ports test-service-mode test-mining-listener
 
 all: build
 
@@ -177,3 +178,7 @@ test-service-ports: configure
 test-service-mode: configure
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_service_mode.c src/stn_service_mode.c -o $(BUILD_DIR)/test-service-mode
 	$(BUILD_DIR)/test-service-mode
+
+test-mining-listener: configure
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_mining_listener.c src/stn_mining_listener.c src/stn_service_mode.c -o $(BUILD_DIR)/test-mining-listener
+	$(BUILD_DIR)/test-mining-listener
