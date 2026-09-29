@@ -1,8 +1,10 @@
 /* Copyright (c) 2026 STN-Labz. All rights reserved. */
+#define _POSIX_C_SOURCE 200809L
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include "stn_stratum_server.h"
@@ -23,6 +25,7 @@ int main(void)
     int pair[2];
     char request[64];
     static const char status_request[]="GET /status HTTP/1.1\r\n\r\n";
+    struct timeval timeout;
     ssize_t got;
 
     CHECK(socketpair(AF_UNIX,SOCK_STREAM,0,pair)==0);
@@ -31,8 +34,17 @@ int main(void)
         return 1;
     }
 
+    /*
+     * The public Explorer allows five seconds for Stratum telemetry. Keep the
+     * service-side receive bounded below that window so a stalled peer cannot
+     * monopolize the deterministic server loop.
+     */
+    timeout.tv_sec=3;
+    timeout.tv_usec=0;
+    CHECK(setsockopt(pair[0],SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout))==0);
+
     errno=0;
-    got=recv(pair[0],request,sizeof(request),0);
+    got=recv(pair[0],request,sizeof(request),MSG_DONTWAIT);
     CHECK(got<0);
     CHECK(errno==EAGAIN || errno==EWOULDBLOCK);
 
