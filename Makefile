@@ -56,7 +56,8 @@ SOURCES := $(COMMON_SOURCES) $(LINUX_SOURCES)
 OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SOURCES))
 
 .PHONY: all configure build install install-service \
-	uninstall uninstall-service clean test-miner-job test-job-refresh test-telemetry
+	uninstall uninstall-service clean test-miner-job test-job-refresh \
+	test-telemetry test-service-ports
 
 all: build
 
@@ -167,3 +168,7 @@ test-job-refresh: configure
 test-telemetry: configure
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_telemetry.c -o $(BUILD_DIR)/test-telemetry
 	$(BUILD_DIR)/test-telemetry
+
+test-service-ports: configure
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_service_ports.c -o $(BUILD_DIR)/test-service-ports
+	$(BUILD_DIR)/test-service-ports
