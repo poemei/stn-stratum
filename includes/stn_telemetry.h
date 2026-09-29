@@ -19,13 +19,11 @@
 #include <winsock2.h>
 typedef SOCKET stn_telemetry_socket;
 typedef HANDLE stn_telemetry_thread;
-typedef CRITICAL_SECTION stn_telemetry_lock;
 #define STN_TELEMETRY_INVALID_SOCKET INVALID_SOCKET
 #else
 #include <pthread.h>
 typedef int stn_telemetry_socket;
 typedef pthread_t stn_telemetry_thread;
-typedef pthread_mutex_t stn_telemetry_lock;
 #define STN_TELEMETRY_INVALID_SOCKET (-1)
 #endif
 
@@ -77,9 +75,8 @@ typedef struct stn_telemetry_service {
     atomic_int worker_running;
     int worker_started;
 
-    /* Main Stratum publishes bounded snapshots under this lock. */
-    stn_telemetry_lock snapshot_lock;
-    int snapshot_lock_ready;
+    /* Main Stratum publishes a bounded snapshot; worker reads only snapshots. */
+    atomic_uint snapshot_sequence;
     stn_telemetry_snapshot snapshot;
 } stn_telemetry_service;
 
