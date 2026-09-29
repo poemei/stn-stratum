@@ -15,7 +15,6 @@
 #include <unistd.h>
 #endif
 
-/* [AI:GPT-5.6 Sol | 2026-09-29 00:00:00 UTC] */
 static int request_complete(const char *request,size_t request_length)
 {
     size_t i;
@@ -29,6 +28,20 @@ static int request_complete(const char *request,size_t request_length)
         }
     }
     return 0;
+}
+
+static void copy_text(char *output,size_t output_size,const char *input)
+{
+    size_t length;
+
+    if(output==NULL || output_size==0u){return;}
+    output[0]='\0';
+    if(input==NULL){return;}
+
+    length=strlen(input);
+    if(length>=output_size){length=output_size-1u;}
+    if(length!=0u){memcpy(output,input,length);}
+    output[length]='\0';
 }
 
 static void socket_close(stn_telemetry_socket socket_fd)
@@ -89,7 +102,7 @@ static void client_remove(
     free(client);
 }
 
-int stn_telemetry_request_valid(const char *request, size_t request_length)
+int stn_telemetry_request_valid(const char *request,size_t request_length)
 {
     static const char status_request[]="GET /status ";
     static const char root_request[]="GET / ";
@@ -178,6 +191,18 @@ int stn_telemetry_http_response(
     return response_length;
 }
 
+static void snapshot_zero(stn_telemetry_snapshot *snapshot)
+{
+    if(snapshot==NULL){return;}
+    memset(snapshot,0,sizeof(*snapshot));
+    memset(snapshot->job_id,'0',64u);
+    memset(snapshot->base_id,'0',64u);
+    memset(snapshot->target,'0',64u);
+    snapshot->job_id[64]='\0';
+    snapshot->base_id[64]='\0';
+    snapshot->target[64]='\0';
+}
+
 void stn_telemetry_service_init(
     stn_telemetry_service *service,
     uint16_t port)
@@ -186,45 +211,56 @@ void stn_telemetry_service_init(
     memset(service,0,sizeof(*service));
     service->listen_socket=STN_TELEMETRY_INVALID_SOCKET;
     service->port=port;
+    atomic_init(&service->worker_running,0);
+    atomic_init(&service->snapshot_sequence,0u);
+    snapshot_zero(&service->snapshot);
 }
 
-int stn_telemetry_service_open(stn_telemetry_service *service)
+static void snapshot_publish(
+    stn_telemetry_service *service,
+    const stn_telemetry_status *status)
 {
-    stn_telemetry_socket socket_fd;
-    struct sockaddr_in address;
-    int reuse=1;
+    unsigned sequence;
 
-    if(service==NULL || service->port==0u){return 0;}
+    sequence=atomic_load_explicit(
+        &service->snapshot_sequence,memory_order_relaxed);
+    atomic_store_explicit(
+        &service->snapshot_sequence,sequence+1u,memory_order_release);
 
-    socket_fd=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
-    if(socket_fd==STN_TELEMETRY_INVALID_SOCKET){return 0;}
+    service->snapshot.chain_connected=status->chain_connected;
+    copy_text(service->snapshot.chain_host,
+        sizeof(service->snapshot.chain_host),status->chain_host);
+    service->snapshot.chain_port=status->chain_port;
+    service->snapshot.work_available=status->work_available;
+    service->snapshot.miners=status->miners;
+    service->snapshot.hashrate=status->hashrate;
+    copy_text(service->snapshot.job_id,
+        sizeof(service->snapshot.job_id),status->job_id);
+    copy_text(service->snapshot.base_id,
+        sizeof(service->snapshot.base_id),status->base_id);
+    copy_text(service->snapshot.target,
+        sizeof(service->snapshot.target),status->target);
+    service->snapshot.uptime_seconds=status->uptime_seconds;
 
-#ifdef _WIN32
-    if(setsockopt(socket_fd,SOL_SOCKET,SO_REUSEADDR,
-        (const char *)&reuse,(int)sizeof(reuse))!=0)
-#else
-    if(setsockopt(socket_fd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse))!=0)
-#endif
-    {
-        socket_close(socket_fd);
-        return 0;
-    }
+    atomic_store_explicit(
+        &service->snapshot_sequence,sequence+2u,memory_order_release);
+}
 
-    memset(&address,0,sizeof(address));
-    address.sin_family=AF_INET;
-    address.sin_addr.s_addr=htonl(INADDR_ANY);
-    address.sin_port=htons(service->port);
+static void snapshot_read(
+    stn_telemetry_service *service,
+    stn_telemetry_snapshot *snapshot)
+{
+    unsigned before;
+    unsigned after;
 
-    if(bind(socket_fd,(const struct sockaddr *)&address,sizeof(address))!=0 ||
-       listen(socket_fd,SOMAXCONN)!=0 ||
-       !socket_nonblocking(socket_fd))
-    {
-        socket_close(socket_fd);
-        return 0;
-    }
-
-    service->listen_socket=socket_fd;
-    return 1;
+    do{
+        before=atomic_load_explicit(
+            &service->snapshot_sequence,memory_order_acquire);
+        if((before&1u)!=0u){continue;}
+        *snapshot=service->snapshot;
+        after=atomic_load_explicit(
+            &service->snapshot_sequence,memory_order_acquire);
+    }while(before!=after || (after&1u)!=0u);
 }
 
 static void accept_clients(stn_telemetry_service *service,time_t now)
@@ -304,7 +340,8 @@ static int client_tick(
                 client->request_length+=(size_t)got;
                 client->request[client->request_length]='\0';
                 if(request_complete(client->request,client->request_length)){
-                    return prepare_response(client,status);
+                    if(!prepare_response(client,status)){return 0;}
+                    break;
                 }
                 continue;
             }
@@ -347,35 +384,163 @@ static int client_tick(
     return 1;
 }
 
-void stn_telemetry_service_tick(
-    stn_telemetry_service *service,
-    const stn_telemetry_status *status,
-    time_t now)
+static void network_tick(stn_telemetry_service *service)
 {
+    stn_telemetry_snapshot snapshot;
+    stn_telemetry_status status;
     stn_telemetry_client *client;
     stn_telemetry_client *next;
+    time_t now=time(NULL);
 
-    if(service==NULL || status==NULL ||
-       service->listen_socket==STN_TELEMETRY_INVALID_SOCKET)
-    {
-        return;
-    }
+    snapshot_read(service,&snapshot);
+
+    memset(&status,0,sizeof(status));
+    status.chain_connected=snapshot.chain_connected;
+    status.chain_host=snapshot.chain_host;
+    status.chain_port=snapshot.chain_port;
+    status.work_available=snapshot.work_available;
+    status.miners=snapshot.miners;
+    status.hashrate=snapshot.hashrate;
+    status.job_id=snapshot.job_id;
+    status.base_id=snapshot.base_id;
+    status.target=snapshot.target;
+    status.uptime_seconds=snapshot.uptime_seconds;
 
     accept_clients(service,now);
 
     client=service->clients;
     while(client!=NULL){
         next=client->next;
-        if(!client_tick(client,status,now)){
+        if(!client_tick(client,&status,now)){
             client_remove(service,client);
         }
         client=next;
     }
 }
 
+static void worker_sleep(void)
+{
+#ifdef _WIN32
+    Sleep(STN_TELEMETRY_WORKER_POLL_MS);
+#else
+    struct timespec request;
+    struct timespec remaining;
+
+    request.tv_sec=0;
+    request.tv_nsec=(long)STN_TELEMETRY_WORKER_POLL_MS*1000000L;
+    while(nanosleep(&request,&remaining)!=0){
+        if(errno!=EINTR){return;}
+        request=remaining;
+    }
+#endif
+}
+
+#ifdef _WIN32
+static DWORD WINAPI telemetry_worker(LPVOID argument)
+#else
+static void *telemetry_worker(void *argument)
+#endif
+{
+    stn_telemetry_service *service=(stn_telemetry_service *)argument;
+
+    while(atomic_load_explicit(
+        &service->worker_running,memory_order_acquire)!=0)
+    {
+        network_tick(service);
+        worker_sleep();
+    }
+
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+int stn_telemetry_service_open(stn_telemetry_service *service)
+{
+    stn_telemetry_socket socket_fd;
+    struct sockaddr_in address;
+    int reuse=1;
+
+    if(service==NULL || service->port==0u || service->worker_started){return 0;}
+
+    socket_fd=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
+    if(socket_fd==STN_TELEMETRY_INVALID_SOCKET){return 0;}
+
+#ifdef _WIN32
+    if(setsockopt(socket_fd,SOL_SOCKET,SO_REUSEADDR,
+        (const char *)&reuse,(int)sizeof(reuse))!=0)
+#else
+    if(setsockopt(socket_fd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse))!=0)
+#endif
+    {
+        socket_close(socket_fd);
+        return 0;
+    }
+
+    memset(&address,0,sizeof(address));
+    address.sin_family=AF_INET;
+    address.sin_addr.s_addr=htonl(INADDR_ANY);
+    address.sin_port=htons(service->port);
+
+    if(bind(socket_fd,(const struct sockaddr *)&address,sizeof(address))!=0 ||
+       listen(socket_fd,SOMAXCONN)!=0 ||
+       !socket_nonblocking(socket_fd))
+    {
+        socket_close(socket_fd);
+        return 0;
+    }
+
+    service->listen_socket=socket_fd;
+    atomic_store_explicit(&service->worker_running,1,memory_order_release);
+
+#ifdef _WIN32
+    service->worker=CreateThread(NULL,0,telemetry_worker,service,0,NULL);
+    if(service->worker==NULL){
+        atomic_store_explicit(&service->worker_running,0,memory_order_release);
+        socket_close(socket_fd);
+        service->listen_socket=STN_TELEMETRY_INVALID_SOCKET;
+        return 0;
+    }
+#else
+    if(pthread_create(&service->worker,NULL,telemetry_worker,service)!=0){
+        atomic_store_explicit(&service->worker_running,0,memory_order_release);
+        socket_close(socket_fd);
+        service->listen_socket=STN_TELEMETRY_INVALID_SOCKET;
+        return 0;
+    }
+#endif
+
+    service->worker_started=1;
+    return 1;
+}
+
+void stn_telemetry_service_tick(
+    stn_telemetry_service *service,
+    const stn_telemetry_status *status,
+    time_t now)
+{
+    (void)now;
+    if(service==NULL || status==NULL){return;}
+    snapshot_publish(service,status);
+}
+
 void stn_telemetry_service_close(stn_telemetry_service *service)
 {
     if(service==NULL){return;}
+
+    if(service->worker_started){
+        atomic_store_explicit(&service->worker_running,0,memory_order_release);
+#ifdef _WIN32
+        (void)WaitForSingleObject(service->worker,INFINITE);
+        CloseHandle(service->worker);
+        service->worker=NULL;
+#else
+        (void)pthread_join(service->worker,NULL);
+#endif
+        service->worker_started=0;
+    }
 
     while(service->clients!=NULL){
         client_remove(service,service->clients);
@@ -386,4 +551,3 @@ void stn_telemetry_service_close(stn_telemetry_service *service)
         service->listen_socket=STN_TELEMETRY_INVALID_SOCKET;
     }
 }
-/* [End AI:GPT-5.6 Sol] */
