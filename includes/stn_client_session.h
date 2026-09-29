@@ -10,11 +10,11 @@
 
 #ifdef _WIN32
 #include <winsock2.h>
-typedef SOCKET stn_client_socket;
-#define STN_CLIENT_INVALID_SOCKET INVALID_SOCKET
+typedef uintptr_t stn_client_socket;
+#define STN_CLIENT_INVALID_SOCKET ((stn_client_socket)INVALID_SOCKET)
 #else
-typedef int stn_client_socket;
-#define STN_CLIENT_INVALID_SOCKET (-1)
+typedef uintptr_t stn_client_socket;
+#define STN_CLIENT_INVALID_SOCKET ((stn_client_socket)-1)
 #endif
 
 typedef struct stn_client_session {
