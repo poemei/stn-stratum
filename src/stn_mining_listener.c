@@ -24,6 +24,16 @@ void stn_mining_listener_init(
     listener->port=stn_service_mode_port(mode);
 }
 
+void stn_mining_socket_close(stn_mining_socket socket_fd)
+{
+    if(socket_fd==STN_MINING_INVALID_SOCKET){return;}
+#ifdef _WIN32
+    closesocket(socket_fd);
+#else
+    (void)close(socket_fd);
+#endif
+}
+
 int stn_mining_listener_open(stn_mining_listener *listener)
 {
     struct sockaddr_in address;
@@ -40,7 +50,7 @@ int stn_mining_listener_open(stn_mining_listener *listener)
         if(setsockopt(socket_fd,SOL_SOCKET,SO_REUSEADDR,
             (const char *)&reuse,(int)sizeof(reuse))!=0)
         {
-            closesocket(socket_fd);
+            stn_mining_socket_close(socket_fd);
             return 0;
         }
 
@@ -53,7 +63,7 @@ int stn_mining_listener_open(stn_mining_listener *listener)
            listen(socket_fd,SOMAXCONN)!=0 ||
            ioctlsocket(socket_fd,FIONBIO,&nonblocking)!=0)
         {
-            closesocket(socket_fd);
+            stn_mining_socket_close(socket_fd);
             return 0;
         }
 
@@ -66,7 +76,7 @@ int stn_mining_listener_open(stn_mining_listener *listener)
 
         if(socket_fd<0){return 0;}
         if(setsockopt(socket_fd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse))!=0){
-            (void)close(socket_fd);
+            stn_mining_socket_close(socket_fd);
             return 0;
         }
 
@@ -78,13 +88,13 @@ int stn_mining_listener_open(stn_mining_listener *listener)
         if(bind(socket_fd,(const struct sockaddr *)&address,sizeof(address))!=0 ||
            listen(socket_fd,SOMAXCONN)!=0)
         {
-            (void)close(socket_fd);
+            stn_mining_socket_close(socket_fd);
             return 0;
         }
 
         flags=fcntl(socket_fd,F_GETFL,0);
         if(flags<0 || fcntl(socket_fd,F_SETFL,flags|O_NONBLOCK)!=0){
-            (void)close(socket_fd);
+            stn_mining_socket_close(socket_fd);
             return 0;
         }
 
@@ -98,13 +108,7 @@ int stn_mining_listener_open(stn_mining_listener *listener)
 void stn_mining_listener_close(stn_mining_listener *listener)
 {
     if(listener==NULL || listener->socket==STN_MINING_INVALID_SOCKET){return;}
-
-#ifdef _WIN32
-    closesocket(listener->socket);
-#else
-    (void)close(listener->socket);
-#endif
-
+    stn_mining_socket_close(listener->socket);
     listener->socket=STN_MINING_INVALID_SOCKET;
 }
 
@@ -135,7 +139,7 @@ int stn_mining_listener_accept(
     {
         u_long nonblocking=1u;
         if(ioctlsocket(accepted,FIONBIO,&nonblocking)!=0){
-            closesocket(accepted);
+            stn_mining_socket_close(accepted);
             return -1;
         }
     }
@@ -152,7 +156,7 @@ int stn_mining_listener_accept(
     {
         int flags=fcntl(accepted,F_GETFL,0);
         if(flags<0 || fcntl(accepted,F_SETFL,flags|O_NONBLOCK)!=0){
-            (void)close(accepted);
+            stn_mining_socket_close(accepted);
             return -1;
         }
     }
