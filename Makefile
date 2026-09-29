@@ -50,6 +50,7 @@ COMMON_SOURCES := \
 	src/stn_service_mode.c \
 	src/stn_mining_listener.c \
 	src/stn_telemetry.c \
+	src/stn_client_mode.c \
 	src/stn_client_session.c
 
 LINUX_SOURCES := \
@@ -191,5 +192,5 @@ test-mining-listener: configure
 	$(BUILD_DIR)/test-mining-listener
 
 test-client-session: configure
-	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_client_session.c src/stn_client_session.c -o $(BUILD_DIR)/test-client-session
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_client_session.c src/stn_client_session.c src/stn_client_mode.c src/stn_service_mode.c -o $(BUILD_DIR)/test-client-session
 	$(BUILD_DIR)/test-client-session
