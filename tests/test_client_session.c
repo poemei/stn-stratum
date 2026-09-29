@@ -21,19 +21,27 @@ int main(void)
 {
     stn_client_session pool;
     stn_client_session solo;
+    stn_client_mode pool_mode;
+    stn_client_mode solo_mode;
 
-    stn_client_session_init(&pool,10,STN_CLIENT_MODE_POOL);
+    stn_client_mode_init(&pool_mode,STN_SERVICE_MODE_POOL);
+    stn_client_session_init(&pool,10,pool_mode);
     CHECK(pool.socket==10);
-    CHECK(pool.mode==STN_CLIENT_MODE_POOL);
+    CHECK(stn_client_mode_is_pool(&pool.mode));
+    CHECK(pool.mode.service_mode==STN_SERVICE_MODE_POOL);
+    CHECK(pool.mode.service_port==stn_service_mode_port(STN_SERVICE_MODE_POOL));
     CHECK(pool.rx_used==0u);
     CHECK(pool.hashrate==0u);
     CHECK(pool.address_registered==0);
     CHECK(pool.has_job==0);
     CHECK(pool.next==NULL);
 
-    stn_client_session_init(&solo,11,STN_CLIENT_MODE_SOLO);
+    stn_client_mode_init(&solo_mode,STN_SERVICE_MODE_SOLO);
+    stn_client_session_init(&solo,11,solo_mode);
     CHECK(solo.socket==11);
-    CHECK(solo.mode==STN_CLIENT_MODE_SOLO);
+    CHECK(stn_client_mode_is_solo(&solo.mode));
+    CHECK(solo.mode.service_mode==STN_SERVICE_MODE_SOLO);
+    CHECK(solo.mode.service_port==stn_service_mode_port(STN_SERVICE_MODE_SOLO));
 
     pool.hashrate=100u;
     solo.hashrate=250u;
