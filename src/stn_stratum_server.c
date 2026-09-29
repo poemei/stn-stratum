@@ -1272,6 +1272,8 @@ void stn_stratum_server_close(stn_stratum_server *server)
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/select.h>
+#include <sys/time.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
