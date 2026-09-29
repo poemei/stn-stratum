@@ -63,6 +63,10 @@ typedef struct stn_stratum_server {
     uintptr_t listen_socket;
     uintptr_t solo_socket;
 
+    /* Legacy embedded telemetry socket remains only until the qualified
+       stn_telemetry_service crossover is completed atomically. */
+    uintptr_t telemetry_socket;
+
     /* [AI:GPT-5.6 Sol | 2026-09-29 00:00:00 UTC] */
     stn_telemetry_service telemetry;
     /* [End AI:GPT-5.6 Sol] */
