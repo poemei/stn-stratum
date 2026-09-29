@@ -22,8 +22,10 @@
 #error Unsupported STN-Stratum platform
 #endif
 
-#define STN_STRATUM_DEFAULT_PORT 18475u
+#define STN_STRATUM_POOL_PORT 18475u
+#define STN_STRATUM_DEFAULT_PORT STN_STRATUM_POOL_PORT
 #define STN_STRATUM_TELEMETRY_PORT 18476u
+#define STN_STRATUM_SOLO_PORT 18477u
 
 #define STN_STRATUM_POLL_MS 250u
 #define STN_STRATUM_CHAIN_POLL_TICKS 4u
@@ -85,6 +87,7 @@ typedef struct stn_stratum_server {
     int have_work;
 
     uintptr_t listen_socket;
+    uintptr_t solo_socket;
     uintptr_t telemetry_socket;
 
     stn_stratum_client_session *clients;
