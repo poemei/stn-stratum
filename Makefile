@@ -46,7 +46,8 @@ COMMON_SOURCES := \
 	src/stn_chain_rpc_adapter.c \
 	src/stn_stratum.c \
 	src/stn_share_verify.c \
-	src/stn_miner_job.c
+	src/stn_miner_job.c \
+	src/stn_service_mode.c
 
 LINUX_SOURCES := \
 	platforms/linux/stn_rpc_linux.c
@@ -57,7 +58,7 @@ OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SOURCES))
 
 .PHONY: all configure build install install-service \
 	uninstall uninstall-service clean test-miner-job test-job-refresh \
-	test-telemetry test-service-ports
+	test-telemetry test-service-ports test-service-mode
 
 all: build
 
@@ -172,3 +173,7 @@ test-telemetry: configure
 test-service-ports: configure
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_service_ports.c -o $(BUILD_DIR)/test-service-ports
 	$(BUILD_DIR)/test-service-ports
+
+test-service-mode: configure
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_service_mode.c src/stn_service_mode.c -o $(BUILD_DIR)/test-service-mode
+	$(BUILD_DIR)/test-service-mode
