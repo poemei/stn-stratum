@@ -19,6 +19,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <sys/select.h>
 
 #pragma comment(lib,"Ws2_32.lib")
 
