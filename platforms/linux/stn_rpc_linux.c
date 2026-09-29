@@ -13,14 +13,7 @@
 #include <unistd.h>
 
 #define STN_INVALID_SOCKET_FD (-1)
-/*
- * Stratum services miners and its telemetry endpoint from one deterministic
- * service loop. Chain RPC therefore must never monopolize that loop longer
- * than the public telemetry client's five-second allowance. Three seconds
- * leaves time for the loop to resume and answer /status while keeping Chain
- * transport failure bounded and explicit.
- */
-#define STN_RPC_IO_TIMEOUT_SECONDS 3
+#define STN_RPC_IO_TIMEOUT_SECONDS 60
 
 static uint32_t read32be(const uint8_t *p)
 {
@@ -94,6 +87,12 @@ static int connect_socket(stn_rpc_linux *t)
         return 0;
     }
 
+    /*
+     * Chain RPC performs deterministic accepted-history reconstruction for
+     * several read paths. A healthy response can therefore exceed the old
+     * five-second transport allowance. Keep the transport bounded, but do not
+     * classify a slow healthy Chain as disconnected before it can answer.
+     */
     timeout.tv_sec=STN_RPC_IO_TIMEOUT_SECONDS;
     timeout.tv_usec=0;
 
