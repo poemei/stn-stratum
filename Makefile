@@ -51,7 +51,8 @@ COMMON_SOURCES := \
 	src/stn_mining_listener.c \
 	src/stn_telemetry.c \
 	src/stn_client_mode.c \
-	src/stn_client_session.c
+	src/stn_client_session.c \
+	src/stn_session_acceptor.c
 
 LINUX_SOURCES := \
 	platforms/linux/stn_rpc_linux.c
@@ -63,7 +64,7 @@ OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SOURCES))
 .PHONY: all configure build install install-service \
 	uninstall uninstall-service clean test-miner-job test-job-refresh \
 	test-telemetry test-telemetry-module test-service-ports test-service-mode \
-	test-mining-listener test-client-session
+	test-mining-listener test-client-session test-session-acceptor
 
 all: build
 
@@ -194,3 +195,7 @@ test-mining-listener: configure
 test-client-session: configure
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_client_session.c src/stn_client_session.c src/stn_client_mode.c src/stn_service_mode.c -o $(BUILD_DIR)/test-client-session
 	$(BUILD_DIR)/test-client-session
+
+test-session-acceptor: configure
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_session_acceptor.c src/stn_session_acceptor.c src/stn_client_session.c src/stn_client_mode.c src/stn_mining_listener.c src/stn_service_mode.c -o $(BUILD_DIR)/test-session-acceptor
+	$(BUILD_DIR)/test-session-acceptor
