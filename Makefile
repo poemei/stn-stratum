@@ -48,7 +48,8 @@ COMMON_SOURCES := \
 	src/stn_share_verify.c \
 	src/stn_miner_job.c \
 	src/stn_service_mode.c \
-	src/stn_mining_listener.c
+	src/stn_mining_listener.c \
+	src/stn_telemetry.c
 
 LINUX_SOURCES := \
 	platforms/linux/stn_rpc_linux.c
@@ -59,7 +60,7 @@ OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SOURCES))
 
 .PHONY: all configure build install install-service \
 	uninstall uninstall-service clean test-miner-job test-job-refresh \
-	test-telemetry test-service-ports test-service-mode test-mining-listener
+	test-telemetry test-telemetry-module test-service-ports test-service-mode test-mining-listener
 
 all: build
 
@@ -170,6 +171,10 @@ test-job-refresh: configure
 test-telemetry: configure
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_telemetry.c -o $(BUILD_DIR)/test-telemetry
 	$(BUILD_DIR)/test-telemetry
+
+test-telemetry-module: configure
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_telemetry_module.c src/stn_telemetry.c -o $(BUILD_DIR)/test-telemetry-module
+	$(BUILD_DIR)/test-telemetry-module
 
 test-service-ports: configure
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_service_ports.c -o $(BUILD_DIR)/test-service-ports
