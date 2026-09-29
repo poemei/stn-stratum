@@ -22,6 +22,7 @@ int main(void)
     static const char root_request[]="GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
     static const char bad_request[]="POST /status HTTP/1.1\r\n\r\n";
     stn_telemetry_status status;
+    stn_telemetry_service service;
     char json[2048];
     char response[4096];
     int json_length;
@@ -59,6 +60,17 @@ int main(void)
     CHECK(strstr(response,"Content-Type: application/json\r\n")!=NULL);
     CHECK(strstr(response,"Cache-Control: no-store\r\n")!=NULL);
     CHECK(strstr(response,"\r\n\r\n{\"service\":\"STN-Stratum\"")!=NULL);
+
+    stn_telemetry_service_init(&service,18476u);
+    CHECK(service.listen_socket==STN_TELEMETRY_INVALID_SOCKET);
+    CHECK(service.clients==NULL);
+    CHECK(service.client_count==0u);
+    CHECK(service.port==18476u);
+
+    stn_telemetry_service_close(&service);
+    CHECK(service.listen_socket==STN_TELEMETRY_INVALID_SOCKET);
+    CHECK(service.clients==NULL);
+    CHECK(service.client_count==0u);
 
     printf("Telemetry module: %u checks, %u failures.\n",checks,failures);
     return failures!=0u ? 1 : 0;
