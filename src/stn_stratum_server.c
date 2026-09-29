@@ -707,14 +707,23 @@ static void process_submission(
 
     client_send_result(server,client,code);
 
-    if(code==STN_RPC_CLIENT_OK ||
-       code==STN_RPC_CLIENT_STALE ||
-       code==STN_RPC_CLIENT_TRANSPORT ||
-       code==STN_RPC_CLIENT_UNAVAILABLE ||
-       code==STN_RPC_CLIENT_PROVIDER ||
-       code==STN_RPC_CLIENT_INVALID)
+    /*
+     * A solved block changes Chain state, but do not invalidate the miner's
+     * session job locally. Chain is authoritative for staleness. Keeping the
+     * sent job until the next template poll prevents a just-submitted solution
+     * from turning an already-in-flight miner SUBMIT into an artificial
+     * Stratum-side stale result.
+     */
+    /*
+     * Submission results do not invalidate Stratum's active job locally.
+     * Chain owns work lifetime.  The polling path replaces work when Chain
+     * publishes a new template or explicitly reports the current work stale.
+     * Keeping the job here also prevents miners from being stranded in
+     * WAIT_JOB while Chain transitions to replacement work.
+     */
+    if(code==STN_RPC_CLIENT_TRANSPORT)
     {
-        clear_work(server);
+        server->chain_available=0;
     }
 
     if(code==STN_RPC_CLIENT_TRANSPORT ||
@@ -1014,7 +1023,11 @@ static void refresh_work(stn_stratum_server *server)
                     "retaining server and retrying.");
             }
             server->chain_available=1;
-            clear_work(server);
+            /*
+             * Chain is reachable but has no replacement template yet.
+             * Retain the current immutable job until Chain supplies new work
+             * or explicitly reports it stale.
+             */
             return;
         }
 
@@ -2015,6 +2028,11 @@ static void process_submission(
     uint8_t share_hash[32];
 
     if(client==NULL){return;}
+    if(!client->address_registered){
+        log_line(server,"CLIENT SUBMIT before ADDRESS.");
+        client_remove(server,client,"ADDRESS required");
+        return;
+    }
 
     p=client->rx;
 
@@ -2604,7 +2622,11 @@ static void refresh_work(stn_stratum_server *server)
                     "retaining server and retrying.");
             }
             server->chain_available=1;
-            clear_work(server);
+            /*
+             * Chain is reachable but has no replacement template yet.
+             * Retain the current immutable job until Chain supplies new work
+             * or explicitly reports it stale.
+             */
             return;
         }
 

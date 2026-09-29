@@ -194,7 +194,7 @@ stn_rpc_client_code stn_rpc_client_mining_template(
     size_t capacity,
     size_t *written)
 {
-    return call(
+    stn_rpc_client_code code=call(
         client,
         STN_RPC_CLIENT_MINING_TEMPLATE,
         NULL,
@@ -202,6 +202,13 @@ stn_rpc_client_code stn_rpc_client_mining_template(
         payload,
         capacity,
         written);
+
+    /* A template-capacity response says Chain cannot publish replacement work
+     * right now. It does not prove the current immutable Work ID is stale.
+     * Present it to the Stratum refresh lifecycle as transient unavailability
+     * so existing work is retained until Chain supplies replacement work or
+     * explicitly reports STALE. */
+    return code==STN_RPC_CLIENT_CAPACITY ? STN_RPC_CLIENT_UNAVAILABLE : code;
 }
 
 stn_rpc_client_code stn_rpc_client_submit_work(
@@ -217,15 +224,10 @@ stn_rpc_client_code stn_rpc_client_submit_work(
         return STN_RPC_CLIENT_INVALID;
     }
 
-    return call(
-        client,
-        STN_RPC_CLIENT_SUBMIT_WORK,
-        payload,
-        length,
-        response_payload,
-        response_capacity,
-        written);
+    return call(client,STN_RPC_CLIENT_SUBMIT_WORK,payload,length,
+        response_payload,response_capacity,written);
 }
+
 stn_rpc_client_code stn_rpc_client_submit_share(
     stn_rpc_client *client,
     const uint8_t *payload,

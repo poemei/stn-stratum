@@ -1,0 +1,12 @@
+{
+    "chain_servers": [
+        {
+            "host": "127.0.0.1",
+            "port": 18473
+        },
+        {
+            "host": "chain01.stn-chain.org",
+            "port": 18473
+        }
+    ]
+}

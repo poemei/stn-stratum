@@ -156,6 +156,7 @@ static stn_stratum_status rpc_submit(
     const uint8_t job_id[32],
     const uint8_t *block,
     size_t block_length,
+    const uint8_t miner_identity[STN_STRATUM_MINER_IDENTITY_SIZE],
     uint64_t nonce)
 {
     stn_chain_rpc_adapter *a=(stn_chain_rpc_adapter *)user;
@@ -165,9 +166,9 @@ static stn_stratum_status rpc_submit(
     stn_rpc_client_code code;
 
     if(a==NULL||a->client==NULL||base_tip==NULL||
-       job_id==NULL||block==NULL||
+       job_id==NULL||block==NULL||miner_identity==NULL||
        block_length<STN_CHAIN_BLOCK_HEADER_SIZE||
-       block_length>STN_RPC_CLIENT_MAX_PAYLOAD-68u)
+       block_length>STN_RPC_CLIENT_MAX_PAYLOAD-68u-STN_STRATUM_MINER_IDENTITY_SIZE)
     {
         return STN_STRATUM_ARGUMENT;
     }
@@ -180,20 +181,22 @@ static stn_stratum_status rpc_submit(
     payload[66]=(uint8_t)(block_length>>8);
     payload[67]=(uint8_t)block_length;
 
-    memcpy(payload+68,block,block_length);
+    memcpy(payload+68u,miner_identity,STN_STRATUM_MINER_IDENTITY_SIZE);
+    memcpy(payload+68u+STN_STRATUM_MINER_IDENTITY_SIZE,block,block_length);
 
     /*
-     * Only the canonical nonce field is changed. All other work bytes remain
-     * exactly as supplied by STN Chain.
+     * Phase 19 SUBMIT_WORK binds the registered stn0_ identity before the
+     * canonical block. Only the canonical nonce field inside that block is
+     * changed.
      */
     write64be(
-        payload+68u+STN_CHAIN_BLOCK_NONCE_OFFSET,
+        payload+68u+STN_STRATUM_MINER_IDENTITY_SIZE+STN_CHAIN_BLOCK_NONCE_OFFSET,
         nonce);
 
     code=stn_rpc_client_submit_work(
         a->client,
         payload,
-        68u+block_length,
+        68u+STN_STRATUM_MINER_IDENTITY_SIZE+block_length,
         response,
         sizeof(response),
         &n);

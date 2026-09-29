@@ -57,6 +57,9 @@ void stn_rpc_client_init(
 stn_rpc_client_code stn_rpc_client_info(stn_rpc_client *client,
     uint8_t *payload,size_t capacity,size_t *written);
 
+/* A Chain CAPACITY response while polling for replacement mining work is
+ * exposed as transient UNAVAILABLE. Capacity does not invalidate an already
+ * issued immutable Work ID; only explicit STALE does that. */
 stn_rpc_client_code stn_rpc_client_mining_template(
     stn_rpc_client *client,
     uint8_t *payload,
