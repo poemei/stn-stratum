@@ -27,6 +27,7 @@ void stn_mining_listener_init(
 
 int stn_mining_listener_open(stn_mining_listener *listener);
 void stn_mining_listener_close(stn_mining_listener *listener);
+void stn_mining_socket_close(stn_mining_socket socket_fd);
 
 /*
  * Accept one client from this listener without blocking.
