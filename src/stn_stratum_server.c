@@ -2,6 +2,19 @@
 #include "stn_stratum_server.h"
 #include "stn_share_verify.h"
 #include "stn_miner_job.h"
+#include "stn_session_acceptor.h"
+
+static void telemetry_hex32(char out[65],const uint8_t value[32])
+{
+    static const char table[]="0123456789abcdef";
+    size_t i;
+
+    for(i=0u;i<32u;i++){
+        out[i*2u]=table[(value[i]>>4)&0x0fu];
+        out[i*2u+1u]=table[value[i]&0x0fu];
+    }
+    out[64]='\0';
+}
 
 #ifdef _WIN32
 
@@ -25,17 +38,6 @@
 
 #define STN_INVALID_SOCKET_VALUE ((uintptr_t)INVALID_SOCKET)
 
-struct stn_stratum_client_session {
-    uintptr_t socket;
-    uint8_t rx[STN_MINER_ADDRESS_FRAME_SIZE];
-    size_t rx_used;
-    uint8_t sent_job_id[32];
-    uint64_t hashrate;
-    char address[STN_MINER_ADDRESS_SIZE];
-    int address_registered;
-    int has_job;
-    struct stn_stratum_client_session *next;
-};
 
 static uint32_t read32be(const uint8_t *p)
 {
@@ -231,10 +233,6 @@ static void client_remove(
 
     *link=client->next;
 
-    if((SOCKET)client->socket!=INVALID_SOCKET){
-        closesocket((SOCKET)client->socket);
-        client->socket=STN_INVALID_SOCKET_VALUE;
-    }
 
     if(server->client_count!=0u){
         server->client_count--;
@@ -248,67 +246,100 @@ static void client_remove(
             server->client_count);
     }
 
-    free(client);
+    stn_session_acceptor_release(client);
 }
 
-static int listener_open(stn_stratum_server *server)
-{
-    SOCKET s;
-    struct sockaddr_in addr;
-    u_long nonblocking=1u;
+static stn_chain_config_entry *active_chain(
+    stn_stratum_server *server);
 
+static void telemetry_tick(stn_stratum_server *server)
+{
+    stn_telemetry_status status;
+    stn_chain_config_entry *entry;
+    char job[65];
+    char base[65];
+    char target[65];
+    time_t now;
+
+    if(server==NULL){return;}
+
+    memset(&status,0,sizeof(status));
+    memset(job,'0',64u); job[64]='\0';
+    memset(base,'0',64u); base[64]='\0';
+    memset(target,'0',64u); target[64]='\0';
+
+    if(server->have_work){
+        telemetry_hex32(job,server->active_job_id);
+        telemetry_hex32(base,server->active_base);
+        if(server->active_template_length>=
+            68u+STN_MINER_CHAIN_TARGET_OFFSET+32u)
+        {
+            telemetry_hex32(target,
+                server->active_template+68u+STN_MINER_CHAIN_TARGET_OFFSET);
+        }
+    }
+
+    entry=active_chain(server);
+    status.chain_connected=server->chain_available;
+    status.chain_host=entry!=NULL?entry->host:"";
+    status.chain_port=entry!=NULL?entry->port:0u;
+    status.work_available=server->have_work;
+    status.miners=stn_client_session_count(server->clients);
+    status.hashrate=stn_client_session_total_hashrate(server->clients);
+    status.job_id=job;
+    status.base_id=base;
+    status.target=target;
+
+    now=time(NULL);
+    if(server->started_at!=(time_t)0 && now>=server->started_at){
+        status.uptime_seconds=(uint64_t)(now-server->started_at);
+    }
+
+    stn_telemetry_service_tick(&server->telemetry,&status,now);
+}
+
+static int listeners_open(stn_stratum_server *server)
+{
+    if(server==NULL){return 0;}
+
+#ifdef _WIN32
     if(!winsock_open(server)){
         log_line(server,"ERROR Winsock initialization failed.");
         return 0;
     }
+#endif
 
-    s=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
-    if(s==INVALID_SOCKET){
-        log_line(server,"ERROR listener socket failed: WSA=%d.",WSAGetLastError());
+    stn_mining_listener_init(&server->pool_listener,STN_SERVICE_MODE_POOL);
+    stn_mining_listener_init(&server->solo_listener,STN_SERVICE_MODE_SOLO);
+
+    if(!stn_mining_listener_open(&server->pool_listener)){
+        log_line(server,"ERROR unable to open Pool listener on port %u.",
+            (unsigned)server->pool_listener.port);
         return 0;
     }
 
-    memset(&addr,0,sizeof(addr));
-    addr.sin_family=AF_INET;
-    addr.sin_addr.s_addr=htonl(INADDR_ANY);
-    addr.sin_port=htons(STN_STRATUM_DEFAULT_PORT);
-
-    if(bind(s,(const struct sockaddr *)&addr,sizeof(addr))!=0){
-        log_line(server,"ERROR bind 0.0.0.0:%u failed: WSA=%d.",
-            (unsigned)STN_STRATUM_DEFAULT_PORT,WSAGetLastError());
-        closesocket(s);
+    if(!stn_mining_listener_open(&server->solo_listener)){
+        log_line(server,"ERROR unable to open Solo listener on port %u.",
+            (unsigned)server->solo_listener.port);
+        stn_mining_listener_close(&server->pool_listener);
         return 0;
     }
 
-    if(listen(s,SOMAXCONN)!=0){
-        log_line(server,"ERROR listen failed: WSA=%d.",WSAGetLastError());
-        closesocket(s);
-        return 0;
-    }
-
-    if(ioctlsocket(s,FIONBIO,&nonblocking)!=0){
-        log_line(server,"ERROR listener nonblocking failed: WSA=%d.",
-            WSAGetLastError());
-        closesocket(s);
-        return 0;
-    }
-
-    server->listen_socket=(uintptr_t)s;
-    log_line(server,"LISTEN 0.0.0.0:%u ready.",
-        (unsigned)STN_STRATUM_DEFAULT_PORT);
+    log_line(server,"LISTEN Pool 0.0.0.0:%u ready.",
+        (unsigned)server->pool_listener.port);
+    log_line(server,"LISTEN Solo 0.0.0.0:%u ready.",
+        (unsigned)server->solo_listener.port);
     return 1;
 }
 
-static void listener_close(stn_stratum_server *server)
+static void listeners_close(stn_stratum_server *server)
 {
-    SOCKET s=(SOCKET)server->listen_socket;
+    if(server==NULL){return;}
 
-    if(s!=INVALID_SOCKET){
-        closesocket(s);
-        server->listen_socket=STN_INVALID_SOCKET_VALUE;
-        log_line(server,"LISTEN port %u closed.",
-            (unsigned)STN_STRATUM_DEFAULT_PORT);
-    }
+    stn_mining_listener_close(&server->solo_listener);
+    stn_mining_listener_close(&server->pool_listener);
+
+    log_line(server,"LISTEN Pool/Solo listeners closed.");
 }
 
 static int client_send_job(
@@ -351,50 +382,37 @@ static int client_send_job(
     return 1;
 }
 
-static void accept_clients(stn_stratum_server *server)
+static void accept_from_listener(
+    stn_stratum_server *server,
+    const stn_mining_listener *listener)
 {
-    SOCKET listener=(SOCKET)server->listen_socket;
-    SOCKET socket;
-    struct sockaddr_storage peer;
-    int peer_length;
-    u_long nonblocking;
-
     for(;;){
-        stn_stratum_client_session *client;
+        stn_stratum_client_session *client=NULL;
+        int result=stn_session_acceptor_accept(listener,&client);
 
-        peer_length=(int)sizeof(peer);
-        socket=accept(listener,(struct sockaddr *)&peer,&peer_length);
-
-        if(socket==INVALID_SOCKET){
-            if(WSAGetLastError()==WSAEWOULDBLOCK){return;}
-            log_line(server,"WARN accept failed: WSA=%d.",WSAGetLastError());
+        if(result==0){return;}
+        if(result<0){
+            log_line(server,"WARN accept failed on %s port %u.",
+                listener->mode==STN_SERVICE_MODE_SOLO?"Solo":"Pool",
+                (unsigned)listener->port);
             return;
         }
 
-        nonblocking=1u;
-        if(ioctlsocket(socket,FIONBIO,&nonblocking)!=0){
-            log_line(server,"CLIENT nonblocking setup failed: WSA=%d.",
-                WSAGetLastError());
-            closesocket(socket);
-            continue;
-        }
-
-        client=(stn_stratum_client_session *)calloc(1u,sizeof(*client));
-        if(client==NULL){
-            log_line(server,
-                "CLIENT rejected: host memory unavailable.");
-            closesocket(socket);
-            continue;
-        }
-
-        client->socket=(uintptr_t)socket;
         client->next=server->clients;
         server->clients=client;
         server->client_count++;
 
-        log_line(server,"CLIENT connected; clients=%zu.",server->client_count);
-
+        log_line(server,"CLIENT connected mode=%s port=%u; clients=%zu.",
+            stn_client_mode_is_solo(&client->mode)?"solo":"pool",
+            (unsigned)listener->port,
+            server->client_count);
     }
+}
+
+static void accept_clients(stn_stratum_server *server)
+{
+    accept_from_listener(server,&server->pool_listener);
+    accept_from_listener(server,&server->solo_listener);
 }
 
 static uint32_t submit_result_code(stn_rpc_client_code code)
@@ -1147,7 +1165,10 @@ void stn_stratum_server_init(stn_stratum_server *server)
     if(server==NULL){return;}
 
     memset(server,0,sizeof(*server));
-    server->listen_socket=STN_INVALID_SOCKET_VALUE;
+    stn_mining_listener_init(&server->pool_listener,STN_SERVICE_MODE_POOL);
+    stn_mining_listener_init(&server->solo_listener,STN_SERVICE_MODE_SOLO);
+    stn_telemetry_service_init(&server->telemetry,STN_STRATUM_TELEMETRY_PORT);
+    server->started_at=time(NULL);
     server->running=1;
 }
 
@@ -1208,14 +1229,26 @@ int stn_stratum_server_run(stn_stratum_server *server)
         "CHAIN servers loaded=%zu.",
         server->chain_config.server_count);
 
-    if(!listener_open(server)){
+    if(!listeners_open(server)){
         log_line(server,"STOP startup failed.");
         return 0;
     }
 
+    if(!stn_telemetry_service_open(&server->telemetry)){
+        log_line(server,"ERROR unable to open telemetry listener on port %u.",
+            (unsigned)STN_STRATUM_TELEMETRY_PORT);
+        listeners_close(server);
+        log_line(server,"STOP startup failed.");
+        return 0;
+    }
+
+    log_line(server,"TELEMETRY 0.0.0.0:%u ready.",
+        (unsigned)STN_STRATUM_TELEMETRY_PORT);
+
     while(server->running){
         accept_clients(server);
         service_clients(server);
+        telemetry_tick(server);
 
         if((server->loop_count%
             STN_STRATUM_CHAIN_POLL_TICKS)==0u)
@@ -1246,7 +1279,8 @@ void stn_stratum_server_close(stn_stratum_server *server)
         client_remove(server,server->clients,NULL);
     }
 
-    listener_close(server);
+    stn_telemetry_service_close(&server->telemetry);
+    listeners_close(server);
     stn_rpc_win32_close(&server->chain_transport);
     winsock_close(server);
 
@@ -1280,17 +1314,6 @@ void stn_stratum_server_close(stn_stratum_server *server)
 
 #define STN_INVALID_SOCKET_VALUE ((uintptr_t)-1)
 
-struct stn_stratum_client_session {
-    uintptr_t socket;
-    uint8_t rx[STN_MINER_ADDRESS_FRAME_SIZE];
-    size_t rx_used;
-    uint8_t sent_job_id[32];
-    uint64_t hashrate;
-    char address[STN_MINER_ADDRESS_SIZE];
-    int address_registered;
-    int has_job;
-    struct stn_stratum_client_session *next;
-};
 
 
 static uint32_t read32be(const uint8_t *p)
@@ -1467,10 +1490,6 @@ static void client_remove(
 
     *link=client->next;
 
-    if(client->socket!=STN_INVALID_SOCKET_VALUE){
-        (void)close((int)client->socket);
-        client->socket=STN_INVALID_SOCKET_VALUE;
-    }
 
     if(server->client_count!=0u){
         server->client_count--;
@@ -1484,396 +1503,101 @@ static void client_remove(
             server->client_count);
     }
 
-    free(client);
+    stn_session_acceptor_release(client);
 }
 
-static void hex32(char out[65],const uint8_t value[32])
-{
-    static const char table[]="0123456789abcdef";
-    size_t i;
-
-    for(i=0u;i<32u;i++){
-        out[i*2u]=table[(value[i]>>4)&0x0fu];
-        out[i*2u+1u]=table[value[i]&0x0fu];
-    }
-
-    out[64]='\0';
-}
-
-static int telemetry_open(stn_stratum_server *server)
-{
-    int socket_fd;
-    int flags;
-    int reuse=1;
-    struct sockaddr_in addr;
-
-    socket_fd=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
-    if(socket_fd<0){return 0;}
-
-    if(setsockopt(socket_fd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse))!=0){
-        (void)close(socket_fd);
-        return 0;
-    }
-
-    memset(&addr,0,sizeof(addr));
-    addr.sin_family=AF_INET;
-    addr.sin_addr.s_addr=htonl(INADDR_ANY);
-    addr.sin_port=htons(STN_STRATUM_TELEMETRY_PORT);
-
-    if(bind(socket_fd,(const struct sockaddr *)&addr,sizeof(addr))!=0 ||
-       listen(socket_fd,SOMAXCONN)!=0)
-    {
-        (void)close(socket_fd);
-        return 0;
-    }
-
-    flags=fcntl(socket_fd,F_GETFL,0);
-    if(flags<0 || fcntl(socket_fd,F_SETFL,flags|O_NONBLOCK)!=0){
-        (void)close(socket_fd);
-        return 0;
-    }
-
-    server->telemetry_socket=(uintptr_t)socket_fd;
-    log_line(server,"TELEMETRY 0.0.0.0:%u ready.",(unsigned)STN_STRATUM_TELEMETRY_PORT);
-    return 1;
-}
-
-static void telemetry_close(stn_stratum_server *server)
-{
-    if(server->telemetry_socket!=STN_INVALID_SOCKET_VALUE){
-        (void)close((int)server->telemetry_socket);
-        server->telemetry_socket=STN_INVALID_SOCKET_VALUE;
-        log_line(server,"TELEMETRY port %u closed.",(unsigned)STN_STRATUM_TELEMETRY_PORT);
-    }
-}
 
 static stn_chain_config_entry *active_chain(
     stn_stratum_server *server);
 
-static int telemetry_wait_readable(
-    int socket_fd,
-    unsigned timeout_ms)
+static void telemetry_tick(stn_stratum_server *server)
 {
-    fd_set read_set;
-    struct timeval timeout;
-    int selected;
-
-    FD_ZERO(&read_set);
-    FD_SET(socket_fd,&read_set);
-
-    timeout.tv_sec=(time_t)(timeout_ms/1000u);
-    timeout.tv_usec=(suseconds_t)((timeout_ms%1000u)*1000u);
-
-    do{
-        selected=select(
-            socket_fd+1,
-            &read_set,
-            NULL,
-            NULL,
-            &timeout);
-    }while(selected<0 && errno==EINTR);
-
-    return selected>0 && FD_ISSET(socket_fd,&read_set);
-}
-
-static int telemetry_request_complete(
-    const char *request,
-    size_t request_length)
-{
-    size_t i;
-
-    if(request==NULL || request_length<4u){return 0;}
-
-    for(i=3u;i<request_length;i++){
-        if(request[i-3u]=='\r' &&
-           request[i-2u]=='\n' &&
-           request[i-1u]=='\r' &&
-           request[i]=='\n')
-        {
-            return 1;
-        }
-    }
-
-    return 0;
-}
-
-static void telemetry_service(stn_stratum_server *server)
-{
-    int client;
-    int flags;
-    char request[512];
-    char body[1024];
-    char response[1400];
+    stn_telemetry_status status;
+    stn_chain_config_entry *entry;
     char job[65];
     char base[65];
     char target[65];
-    const char *chain_host="";
-    unsigned chain_port=0u;
-    unsigned long long uptime=0u;
-    uint64_t hashrate=0u;
-    size_t request_length=0u;
-    int body_length;
-    int response_length;
     time_t now;
-    stn_chain_config_entry *entry;
 
-    client=accept((int)server->telemetry_socket,NULL,NULL);
-    if(client<0){
-        if(errno!=EAGAIN &&
-           errno!=EWOULDBLOCK &&
-           errno!=EINTR)
-        {
-            log_line(
-                server,
-                "WARN telemetry accept failed: errno=%d.",
-                errno);
-        }
-        return;
-    }
+    if(server==NULL){return;}
 
-    flags=fcntl(client,F_GETFL,0);
-    if(flags<0 ||
-       fcntl(client,F_SETFL,flags|O_NONBLOCK)!=0)
-    {
-        (void)close(client);
-        return;
-    }
-
-    /*
-     * Telemetry requests are deliberately tiny. Permit a bounded 100 ms
-     * window for fragmented HTTP headers, but never allow telemetry to
-     * monopolize the Stratum service loop indefinitely.
-     */
-    while(request_length<sizeof(request)-1u){
-        ssize_t got;
-
-        got=recv(
-            client,
-            request+request_length,
-            sizeof(request)-1u-request_length,
-            0);
-
-        if(got>0){
-            request_length+=(size_t)got;
-            request[request_length]='\0';
-
-            if(telemetry_request_complete(
-                   request,
-                   request_length))
-            {
-                break;
-            }
-            continue;
-        }
-
-        if(got==0){
-            (void)close(client);
-            return;
-        }
-
-        if(errno==EINTR){
-            continue;
-        }
-
-        if(errno==EAGAIN ||
-           errno==EWOULDBLOCK)
-        {
-            if(!telemetry_wait_readable(client,100u)){
-                (void)close(client);
-                return;
-            }
-            continue;
-        }
-
-        (void)close(client);
-        return;
-    }
-
-    if(!telemetry_request_complete(
-           request,
-           request_length))
-    {
-        (void)close(client);
-        return;
-    }
-
-    if(strncmp(request,"GET /status ",12)!=0 &&
-       strncmp(request,"GET / ",6)!=0)
-    {
-        static const char not_found[]=
-            "HTTP/1.1 404 Not Found\r\n"
-            "Content-Length: 0\r\n"
-            "Connection: close\r\n"
-            "\r\n";
-
-        (void)fcntl(client,F_SETFL,flags);
-        (void)send_all(
-            client,
-            (const uint8_t *)not_found,
-            sizeof(not_found)-1u);
-        (void)close(client);
-        return;
-    }
-
+    memset(&status,0,sizeof(status));
     memset(job,'0',64u); job[64]='\0';
     memset(base,'0',64u); base[64]='\0';
     memset(target,'0',64u); target[64]='\0';
 
     if(server->have_work){
-        hex32(job,server->active_job_id);
-        hex32(base,server->active_base);
-        if(server->active_template_length>=68u+STN_MINER_CHAIN_TARGET_OFFSET+32u){
-            hex32(target,server->active_template+68u+STN_MINER_CHAIN_TARGET_OFFSET);
+        telemetry_hex32(job,server->active_job_id);
+        telemetry_hex32(base,server->active_base);
+        if(server->active_template_length>=
+            68u+STN_MINER_CHAIN_TARGET_OFFSET+32u)
+        {
+            telemetry_hex32(target,
+                server->active_template+68u+STN_MINER_CHAIN_TARGET_OFFSET);
         }
     }
 
     entry=active_chain(server);
-    if(entry!=NULL){
-        chain_host=entry->host;
-        chain_port=(unsigned)entry->port;
-    }
+    status.chain_connected=server->chain_available;
+    status.chain_host=entry!=NULL?entry->host:"";
+    status.chain_port=entry!=NULL?entry->port:0u;
+    status.work_available=server->have_work;
+    status.miners=stn_client_session_count(server->clients);
+    status.hashrate=stn_client_session_total_hashrate(server->clients);
+    status.job_id=job;
+    status.base_id=base;
+    status.target=target;
 
     now=time(NULL);
     if(server->started_at!=(time_t)0 && now>=server->started_at){
-        uptime=(unsigned long long)(now-server->started_at);
+        status.uptime_seconds=(uint64_t)(now-server->started_at);
     }
 
-    {
-        stn_stratum_client_session *miner;
-
-        for(miner=server->clients;miner!=NULL;miner=miner->next){
-            if(UINT64_MAX-hashrate<miner->hashrate){
-                hashrate=UINT64_MAX;
-                break;
-            }
-            hashrate+=miner->hashrate;
-        }
-    }
-
-    body_length=snprintf(body,sizeof(body),
-        "{\"service\":\"STN-Stratum\",\"status\":\"running\",\"chain_connected\":%s,\"chain_host\":\"%s\",\"chain_port\":%u,\"work_available\":%s,\"miners\":%zu,\"hashrate\":%llu,\"job_id\":\"%s\",\"base_id\":\"%s\",\"target\":\"%s\",\"uptime_seconds\":%llu}\n",
-        server->chain_available?"true":"false",chain_host,chain_port,
-        server->have_work?"true":"false",server->client_count,
-        (unsigned long long)hashrate,job,base,target,uptime);
-
-    if(body_length<0 || (size_t)body_length>=sizeof(body)){
-        (void)close(client);
-        return;
-    }
-
-    response_length=snprintf(response,sizeof(response),
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n%s",
-        body_length,body);
-
-    if(response_length>0 && (size_t)response_length<sizeof(response)){
-        /*
-         * send_all() has blocking-socket semantics. Restore the accepted
-         * socket's original mode only for this small, bounded response.
-         */
-        (void)fcntl(client,F_SETFL,flags);
-        (void)send_all(
-            client,
-            (const uint8_t *)response,
-            (size_t)response_length);
-    }
-
-    (void)close(client);
+    stn_telemetry_service_tick(&server->telemetry,&status,now);
 }
 
-static int listener_open(stn_stratum_server *server)
+static int listeners_open(stn_stratum_server *server)
 {
-    int socket_fd;
-    int flags;
-    int reuse=1;
-    struct sockaddr_in addr;
+    if(server==NULL){return 0;}
 
-    socket_fd=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
+#ifdef _WIN32
+    if(!winsock_open(server)){
+        log_line(server,"ERROR Winsock initialization failed.");
+        return 0;
+    }
+#endif
 
-    if(socket_fd<0){
-        log_line(
-            server,
-            "ERROR listener socket failed: errno=%d.",
-            errno);
+    stn_mining_listener_init(&server->pool_listener,STN_SERVICE_MODE_POOL);
+    stn_mining_listener_init(&server->solo_listener,STN_SERVICE_MODE_SOLO);
+
+    if(!stn_mining_listener_open(&server->pool_listener)){
+        log_line(server,"ERROR unable to open Pool listener on port %u.",
+            (unsigned)server->pool_listener.port);
         return 0;
     }
 
-    if(setsockopt(
-        socket_fd,
-        SOL_SOCKET,
-        SO_REUSEADDR,
-        &reuse,
-        sizeof(reuse))!=0)
-    {
-        log_line(
-            server,
-            "ERROR listener reuse setup failed: errno=%d.",
-            errno);
-        (void)close(socket_fd);
+    if(!stn_mining_listener_open(&server->solo_listener)){
+        log_line(server,"ERROR unable to open Solo listener on port %u.",
+            (unsigned)server->solo_listener.port);
+        stn_mining_listener_close(&server->pool_listener);
         return 0;
     }
 
-    memset(&addr,0,sizeof(addr));
-    addr.sin_family=AF_INET;
-    addr.sin_addr.s_addr=htonl(INADDR_ANY);
-    addr.sin_port=htons(STN_STRATUM_DEFAULT_PORT);
-
-    if(bind(
-        socket_fd,
-        (const struct sockaddr *)&addr,
-        sizeof(addr))!=0)
-    {
-        log_line(
-            server,
-            "ERROR bind 0.0.0.0:%u failed: errno=%d.",
-            (unsigned)STN_STRATUM_DEFAULT_PORT,
-            errno);
-        (void)close(socket_fd);
-        return 0;
-    }
-
-    if(listen(socket_fd,SOMAXCONN)!=0){
-        log_line(
-            server,
-            "ERROR listen failed: errno=%d.",
-            errno);
-        (void)close(socket_fd);
-        return 0;
-    }
-
-    flags=fcntl(socket_fd,F_GETFL,0);
-
-    if(flags<0 ||
-       fcntl(socket_fd,F_SETFL,flags|O_NONBLOCK)!=0)
-    {
-        log_line(
-            server,
-            "ERROR listener nonblocking failed: errno=%d.",
-            errno);
-        (void)close(socket_fd);
-        return 0;
-    }
-
-    server->listen_socket=(uintptr_t)socket_fd;
-
-    log_line(
-        server,
-        "LISTEN 0.0.0.0:%u ready.",
-        (unsigned)STN_STRATUM_DEFAULT_PORT);
-
+    log_line(server,"LISTEN Pool 0.0.0.0:%u ready.",
+        (unsigned)server->pool_listener.port);
+    log_line(server,"LISTEN Solo 0.0.0.0:%u ready.",
+        (unsigned)server->solo_listener.port);
     return 1;
 }
 
-static void listener_close(stn_stratum_server *server)
+static void listeners_close(stn_stratum_server *server)
 {
-    if(server->listen_socket!=STN_INVALID_SOCKET_VALUE){
-        (void)close((int)server->listen_socket);
-        server->listen_socket=STN_INVALID_SOCKET_VALUE;
+    if(server==NULL){return;}
 
-        log_line(
-            server,
-            "LISTEN port %u closed.",
-            (unsigned)STN_STRATUM_DEFAULT_PORT);
-    }
+    stn_mining_listener_close(&server->solo_listener);
+    stn_mining_listener_close(&server->pool_listener);
+
+    log_line(server,"LISTEN Pool/Solo listeners closed.");
 }
 
 static int client_send_job(
@@ -1929,76 +1653,37 @@ static int client_send_job(
     return 1;
 }
 
-static void accept_clients(stn_stratum_server *server)
+static void accept_from_listener(
+    stn_stratum_server *server,
+    const stn_mining_listener *listener)
 {
-    int listener=(int)server->listen_socket;
-
     for(;;){
-        int socket_fd;
-        int flags;
-        struct sockaddr_storage peer;
-        socklen_t peer_length;
-        stn_stratum_client_session *client;
+        stn_stratum_client_session *client=NULL;
+        int result=stn_session_acceptor_accept(listener,&client);
 
-        peer_length=(socklen_t)sizeof(peer);
-
-        socket_fd=accept(
-            listener,
-            (struct sockaddr *)&peer,
-            &peer_length);
-
-        if(socket_fd<0){
-            if(errno==EAGAIN || errno==EWOULDBLOCK){
-                return;
-            }
-
-            if(errno==EINTR){
-                continue;
-            }
-
-            log_line(
-                server,
-                "WARN accept failed: errno=%d.",
-                errno);
+        if(result==0){return;}
+        if(result<0){
+            log_line(server,"WARN accept failed on %s port %u.",
+                listener->mode==STN_SERVICE_MODE_SOLO?"Solo":"Pool",
+                (unsigned)listener->port);
             return;
         }
 
-        flags=fcntl(socket_fd,F_GETFL,0);
-
-        if(flags<0 ||
-           fcntl(socket_fd,F_SETFL,flags|O_NONBLOCK)!=0)
-        {
-            log_line(
-                server,
-                "CLIENT nonblocking setup failed: errno=%d.",
-                errno);
-            (void)close(socket_fd);
-            continue;
-        }
-
-        client=(stn_stratum_client_session *)calloc(
-            1u,
-            sizeof(*client));
-
-        if(client==NULL){
-            log_line(
-                server,
-                "CLIENT rejected: host memory unavailable.");
-            (void)close(socket_fd);
-            continue;
-        }
-
-        client->socket=(uintptr_t)socket_fd;
         client->next=server->clients;
         server->clients=client;
         server->client_count++;
 
-        log_line(
-            server,
-            "CLIENT connected; clients=%zu.",
+        log_line(server,"CLIENT connected mode=%s port=%u; clients=%zu.",
+            stn_client_mode_is_solo(&client->mode)?"solo":"pool",
+            (unsigned)listener->port,
             server->client_count);
-
     }
+}
+
+static void accept_clients(stn_stratum_server *server)
+{
+    accept_from_listener(server,&server->pool_listener);
+    accept_from_listener(server,&server->solo_listener);
 }
 
 static uint32_t submit_result_code(stn_rpc_client_code code)
@@ -2939,11 +2624,17 @@ void stn_stratum_server_init(stn_stratum_server *server)
 
     memset(server,0,sizeof(*server));
 
-    server->listen_socket=
-        STN_INVALID_SOCKET_VALUE;
+    stn_mining_listener_init(
+        &server->pool_listener,
+        STN_SERVICE_MODE_POOL);
 
-    server->telemetry_socket=
-        STN_INVALID_SOCKET_VALUE;
+    stn_mining_listener_init(
+        &server->solo_listener,
+        STN_SERVICE_MODE_SOLO);
+
+    stn_telemetry_service_init(
+        &server->telemetry,
+        STN_STRATUM_TELEMETRY_PORT);
 
     server->started_at=time(NULL);
     server->running=1;
@@ -3039,7 +2730,7 @@ int stn_stratum_server_run(stn_stratum_server *server)
         "CHAIN servers loaded=%zu.",
         server->chain_config.server_count);
 
-    if(!listener_open(server)){
+    if(!listeners_open(server)){
         log_line(
             server,
             "STOP startup failed.");
@@ -3047,19 +2738,23 @@ int stn_stratum_server_run(stn_stratum_server *server)
         return 0;
     }
 
-    if(!telemetry_open(server)){
+    if(!stn_telemetry_service_open(&server->telemetry)){
         log_line(
             server,
             "ERROR unable to open telemetry listener on port %u.",
             (unsigned)STN_STRATUM_TELEMETRY_PORT);
+        listeners_close(server);
         log_line(server,"STOP startup failed.");
         return 0;
     }
 
+    log_line(server,"TELEMETRY 0.0.0.0:%u ready.",
+        (unsigned)STN_STRATUM_TELEMETRY_PORT);
+
     while(server->running){
         accept_clients(server);
         service_clients(server);
-        telemetry_service(server);
+        telemetry_tick(server);
 
         if((server->loop_count%
             STN_STRATUM_CHAIN_POLL_TICKS)==0u)
@@ -3098,8 +2793,8 @@ void stn_stratum_server_close(stn_stratum_server *server)
             NULL);
     }
 
-    telemetry_close(server);
-    listener_close(server);
+    stn_telemetry_service_close(&server->telemetry);
+    listeners_close(server);
 
     stn_rpc_linux_close(
         &server->chain_transport);
