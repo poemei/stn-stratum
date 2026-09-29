@@ -12,6 +12,7 @@
 #include "stn_chain_config.h"
 #include "stn_telemetry.h"
 #include "stn_client_session.h"
+#include "stn_mining_listener.h"
 
 #ifdef _WIN32
 #include "stn_rpc_win32.h"
@@ -61,16 +62,16 @@ typedef struct stn_stratum_server {
     size_t active_template_length;
     int have_work;
 
-    uintptr_t listen_socket;
-    uintptr_t solo_socket;
+    /* Mining mode is assigned by the listener that accepted the session.
+       18475 is Pool; 18477 is Solo. */
+    stn_mining_listener pool_listener;
+    stn_mining_listener solo_listener;
 
     /* Legacy embedded telemetry socket remains only until the qualified
        stn_telemetry_service crossover is completed atomically. */
     uintptr_t telemetry_socket;
 
-    /* [AI:GPT-5.6 Sol | 2026-09-29 00:00:00 UTC] */
     stn_telemetry_service telemetry;
-    /* [End AI:GPT-5.6 Sol] */
 
     stn_stratum_client_session *clients;
     size_t client_count;
