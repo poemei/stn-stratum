@@ -18,6 +18,8 @@ int main(void)
 {
     stn_mining_listener pool;
     stn_mining_listener solo;
+    int pool_open;
+    int solo_open;
 
     stn_mining_listener_init(&pool,STN_SERVICE_MODE_POOL);
     stn_mining_listener_init(&solo,STN_SERVICE_MODE_SOLO);
@@ -31,6 +33,25 @@ int main(void)
     CHECK(solo.socket==STN_MINING_INVALID_SOCKET);
 
     CHECK(pool.port!=solo.port);
+
+    /*
+     * Qualification must prove that both production mining listeners can
+     * coexist.  This catches accidental port aliasing and socket setup
+     * regressions before the server crossover uses both listeners.
+     */
+    pool_open=stn_mining_listener_open(&pool);
+    CHECK(pool_open==1);
+    CHECK(pool.socket!=STN_MINING_INVALID_SOCKET);
+
+    solo_open=stn_mining_listener_open(&solo);
+    CHECK(solo_open==1);
+    CHECK(solo.socket!=STN_MINING_INVALID_SOCKET);
+
+    if(pool_open){stn_mining_listener_close(&pool);}
+    if(solo_open){stn_mining_listener_close(&solo);}
+
+    CHECK(pool.socket==STN_MINING_INVALID_SOCKET);
+    CHECK(solo.socket==STN_MINING_INVALID_SOCKET);
 
     printf("Mining listener: %u checks, %u failures.\n",checks,failures);
     return failures!=0u ? 1 : 0;
