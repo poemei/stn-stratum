@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 STN-Labz. All rights reserved. */
 #include "stn_client_mode.h"
 
+#include <stddef.h>
+
 void stn_client_mode_init(
     stn_client_mode *client_mode,
     stn_service_mode service_mode)
