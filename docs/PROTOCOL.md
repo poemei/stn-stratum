@@ -190,3 +190,22 @@ cumulative work at offset 104; accepted SUBMIT_WORK responses are 80 bytes with
 full response. Version 1 and invalid response lengths fail closed. STNM jobs,
 32-byte targets/work IDs and 64-bit nonce mapping are unchanged. Rebuild both
 Chain and Stratum for protocol interoperability; no automatic v1 fallback exists.
+
+## Asynchronous JOB/RESULT ordering - 2026-10-01
+
+JOB is an asynchronous server notification. A replacement JOB can cross a miner's
+SUBMIT in flight and arrive before its RESULT. A client awaiting a RESULT must
+consume and validate complete JOB frames, retain the newest job, and continue
+until the actual RESULT arrives. A JOB is neither acceptance nor a transport
+failure. Core implements this with bounded frame sizes and bounded interleaving;
+malformed/unknown frames still fail closed. No wire-format change was made.
+
+The server processes one complete inbound frame per miner per pass, retaining
+incomplete frames for later input. This bounds how much one continuously ready
+miner can delay peers and the work refresh. Chain requests remain synchronous;
+Chain delays are not reported as accepted shares.
+
+Core uses a 75-second timeout on its Stratum session, allowing the backend Chain
+RPC deadline of 60 seconds plus scheduling and reply delivery. This is a client
+setting, not a wire or consensus change. Synchronous backend work can still delay
+all sessions; it does not provide a hard end-to-end deadline under arbitrary load.

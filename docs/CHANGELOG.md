@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+### Telemetry responsiveness and website status route - 2026-10-01
+
+- Continue servicing the existing telemetry listener while the Chain RPC receive
+  path waits for a response. Both transport headers expose a non-reentrant idle
+  callback; Linux/Windows receive loops poll at 100 ms with bounded monotonic
+  deadlines, and the server wires only telemetry into that callback.
+- Add a real-socket regression: ten HTTP replies while a fake Chain delays and
+  fragments the response header and payload; the eventual RPC result is preserved.
+  Linux production/fairness/new regression and Windows production builds pass.
+- Deploy to chain01. Also register the website's existing public Home status action
+  in its module manifest, fixing the polling endpoint's HTTP 404. No new public
+  controller action or telemetry schema was introduced.
+- See docs/TELEMETRY_REPAIR.md for before/after evidence and deployment details.
+
+
+### Miner response scheduling and Core interoperability - 2026-10-01
+
+- Limit each miner to one complete inbound frame per server pass on Linux and
+  Windows. Previously a continuously ready client could monopolize processing,
+  delaying other miners and replacement-work polling beyond client timeouts.
+  Preserve partial-frame buffering and existing Chain-authoritative results.
+- Add a real socket/session regression covering a queued busy miner, timely peer
+  replies and fragmented frames. Linux fairness, client-session, job-refresh and
+  miner-job tests pass. Linux and Windows production builds pass.
+- Repair the existing Windows build's missing session/listener/telemetry modules
+  and misplaced Unix-only select header.
+- Core companion repair: while awaiting RESULT, validate and retain interleaved
+  JOB frames, then return the actual RESULT and deliver the newest JOB on polling.
+  Core full build/test suite passes, including JOB/JOB/RESULT and malformed JOB.
+  Core also sets its mining-session timeout to 75 seconds, above the backend
+  Chain RPC allowance of 60 seconds; final rebuild and focused client test pass.
+- Deployed Stratum to chain01 with previous binary preserved; updated and normally
+  restarted the three desktop Core profiles, preserving executable backups and
+  form inputs. No wallet, identity, Chain consensus or configuration changes.
+  Live observation is recorded in docs/STRATUM_TIMEOUT_REPAIR.md. Uncommitted.
+
+
 ### Mining-template availability versus transport failure
 
 - Windows and Linux refresh paths now retain a responding Chain endpoint after

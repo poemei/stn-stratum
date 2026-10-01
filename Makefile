@@ -199,3 +199,15 @@ test-client-session: configure
 test-session-acceptor: configure
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_session_acceptor.c src/stn_session_acceptor.c src/stn_client_session.c src/stn_client_mode.c src/stn_mining_listener.c src/stn_service_mode.c -o $(BUILD_DIR)/test-session-acceptor
 	$(BUILD_DIR)/test-session-acceptor
+
+.PHONY: test-service-fairness
+test-service-fairness: configure
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_service_fairness.c $(filter-out src/main.c src/stn_stratum_server.c,$(SOURCES)) -o $(BUILD_DIR)/test-service-fairness
+	$(BUILD_DIR)/test-service-fairness
+
+$(OBJECTS): $(wildcard includes/*.h)
+
+.PHONY: test-telemetry-rpc-wait
+test-telemetry-rpc-wait: configure
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_telemetry_rpc_wait.c src/stn_telemetry.c platforms/linux/stn_rpc_linux.c -o $(BUILD_DIR)/test-telemetry-rpc-wait
+	$(BUILD_DIR)/test-telemetry-rpc-wait

@@ -4,6 +4,12 @@
 #include "stn_miner_job.h"
 #include "stn_session_acceptor.h"
 
+static void telemetry_tick(stn_stratum_server *server);
+static void telemetry_idle(void *user)
+{
+    telemetry_tick((stn_stratum_server *)user);
+}
+
 static void telemetry_hex32(char out[65],const uint8_t value[32])
 {
     static const char table[]="0123456789abcdef";
@@ -32,7 +38,6 @@ static void telemetry_hex32(char out[65],const uint8_t value[32])
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
-#include <sys/select.h>
 
 #pragma comment(lib,"Ws2_32.lib")
 
@@ -511,6 +516,9 @@ static int chain_transport_select(
         entry->host,
         entry->port);
 
+    server->chain_transport.idle=telemetry_idle;
+    server->chain_transport.idle_user=server;
+
     stn_rpc_client_init(
         &server->chain_rpc,
         &server->chain_transport,
@@ -965,6 +973,9 @@ static void service_client(
         }
 
         client->rx_used=0u;
+        /* One complete frame per pass: a busy miner must yield to peers
+         * and the Chain work poll instead of draining an unbounded stream. */
+        return;
     }
 }
 
@@ -1809,6 +1820,9 @@ static int chain_transport_select(
         entry->host,
         entry->port);
 
+    server->chain_transport.idle=telemetry_idle;
+    server->chain_transport.idle_user=server;
+
     stn_rpc_client_init(
         &server->chain_rpc,
         &server->chain_transport,
@@ -2361,6 +2375,9 @@ static void service_client(
         }
 
         client->rx_used=0u;
+        /* One complete frame per pass: a busy miner must yield to peers
+         * and the Chain work poll instead of draining an unbounded stream. */
+        return;
     }
 }
 
