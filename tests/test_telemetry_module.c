@@ -24,53 +24,63 @@ static unsigned failures;
     } \
 } while(0)
 
-/* [AI:GPT-5.6 Sol | 2026-09-29 00:00:00 UTC] */
 #ifndef _WIN32
-static int connect_test_client(uint16_t port)
+static void delay_ms(unsigned milliseconds)
 {
+    struct timespec request;
+    struct timespec remaining;
+
+    request.tv_sec=(time_t)(milliseconds/1000u);
+    request.tv_nsec=(long)(milliseconds%1000u)*1000000L;
+    while(nanosleep(&request,&remaining)!=0){
+        if(errno!=EINTR){return;}
+        request=remaining;
+    }
+}
+
+static int request_status(uint16_t port,char *buffer,size_t buffer_size)
+{
+    static const char request[]=
+        "GET /status HTTP/1.1\r\n"
+        "Host: localhost\r\n"
+        "Connection: close\r\n\r\n";
     int socket_fd;
     int flags;
     struct sockaddr_in address;
+    size_t used=0u;
+    unsigned attempt;
 
     socket_fd=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
-    if(socket_fd<0){return -1;}
-
-    flags=fcntl(socket_fd,F_GETFL,0);
-    if(flags<0 || fcntl(socket_fd,F_SETFL,flags|O_NONBLOCK)!=0){
-        (void)close(socket_fd);
-        return -1;
-    }
+    if(socket_fd<0){return 0;}
 
     memset(&address,0,sizeof(address));
     address.sin_family=AF_INET;
     address.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
     address.sin_port=htons(port);
 
-    if(connect(socket_fd,(const struct sockaddr *)&address,sizeof(address))!=0 &&
-       errno!=EINPROGRESS)
-    {
+    if(connect(socket_fd,(const struct sockaddr *)&address,sizeof(address))!=0){
         (void)close(socket_fd);
-        return -1;
+        return 0;
     }
 
-    return socket_fd;
-}
+    if(send(socket_fd,request,sizeof(request)-1u,0)!=(ssize_t)(sizeof(request)-1u)){
+        (void)close(socket_fd);
+        return 0;
+    }
 
-static int receive_response(int socket_fd,char *buffer,size_t buffer_size)
-{
-    unsigned attempt;
-    size_t used=0u;
+    flags=fcntl(socket_fd,F_GETFL,0);
+    if(flags<0 || fcntl(socket_fd,F_SETFL,flags|O_NONBLOCK)!=0){
+        (void)close(socket_fd);
+        return 0;
+    }
 
-    if(buffer==NULL || buffer_size<2u){return 0;}
-
-    for(attempt=0u;attempt<100u && used+1u<buffer_size;attempt++){
+    for(attempt=0u;attempt<200u && used+1u<buffer_size;attempt++){
         ssize_t got=recv(socket_fd,buffer+used,buffer_size-1u-used,0);
         if(got>0){
             used+=(size_t)got;
             buffer[used]='\0';
-            if(strstr(buffer,"\r\n\r\n")!=NULL &&
-               strstr(buffer,"\"service\":\"STN-Stratum\"")!=NULL)
-            {
+            if(strstr(buffer,"\"service\":\"STN-Stratum\"")!=NULL){
+                (void)close(socket_fd);
                 return 1;
             }
         }else if(got==0){
@@ -78,15 +88,10 @@ static int receive_response(int socket_fd,char *buffer,size_t buffer_size)
         }else if(errno!=EAGAIN && errno!=EWOULDBLOCK && errno!=EINTR){
             break;
         }
-
-        {
-            struct timespec delay;
-            delay.tv_sec=0;
-            delay.tv_nsec=1000000L;
-            (void)nanosleep(&delay,NULL);
-        }
+        delay_ms(5u);
     }
 
+    (void)close(socket_fd);
     return 0;
 }
 #endif
@@ -141,6 +146,7 @@ int main(void)
     CHECK(service.clients==NULL);
     CHECK(service.client_count==0u);
     CHECK(service.port==18476u);
+    CHECK(service.worker_started==0);
 
     stn_telemetry_service_close(&service);
     CHECK(service.listen_socket==STN_TELEMETRY_INVALID_SOCKET);
@@ -150,60 +156,41 @@ int main(void)
 #ifndef _WIN32
     {
         stn_telemetry_service live;
-        int opened;
+        const uint16_t test_port=19476u;
+        char received[4096];
 
-        stn_telemetry_service_init(&live,18476u);
-        opened=stn_telemetry_service_open(&live);
+        stn_telemetry_service_init(&live,test_port);
+        CHECK(stn_telemetry_service_open(&live)==1);
+        CHECK(live.listen_socket!=STN_TELEMETRY_INVALID_SOCKET);
+        CHECK(live.worker_started==1);
+
+        stn_telemetry_service_tick(&live,&status,time(NULL));
+        memset(received,0,sizeof(received));
+        CHECK(request_status(test_port,received,sizeof(received))==1);
+        CHECK(strncmp(received,"HTTP/1.1 200 OK\r\n",17u)==0);
+        CHECK(strstr(received,"\"miners\":4")!=NULL);
 
         /*
-         * Port 18476 is the production telemetry port. During in-place
-         * qualification it may already be owned by the running Stratum
-         * service. An occupied production port is not a telemetry-module
-         * failure. When the port is available, exercise the complete live
-         * accept/request/response path.
+         * Regression: the caller deliberately stops publishing for one full
+         * second. The telemetry worker must continue accepting and answering
+         * requests without any help from the Stratum mining/Chain loop.
          */
-        if(opened){
-            int client_socket;
-            ssize_t sent;
-            char received[4096];
-            unsigned tick;
-            int got_response=0;
+        delay_ms(1000u);
+        memset(received,0,sizeof(received));
+        CHECK(request_status(test_port,received,sizeof(received))==1);
+        CHECK(strstr(received,"\"hashrate\":123456")!=NULL);
 
-            CHECK(live.listen_socket!=STN_TELEMETRY_INVALID_SOCKET);
-
-            client_socket=connect_test_client(18476u);
-            CHECK(client_socket>=0);
-
-            if(client_socket>=0){
-                for(tick=0u;tick<10u;tick++){
-                    stn_telemetry_service_tick(&live,&status,time(NULL));
-                    if(live.client_count>0u){break;}
-                }
-                CHECK(live.client_count==1u);
-
-                sent=send(client_socket,status_request,sizeof(status_request)-1u,0);
-                CHECK(sent==(ssize_t)(sizeof(status_request)-1u));
-
-                for(tick=0u;tick<100u;tick++){
-                    stn_telemetry_service_tick(&live,&status,time(NULL));
-                    if(receive_response(client_socket,received,sizeof(received))){
-                        got_response=1;
-                        break;
-                    }
-                }
-                CHECK(got_response==1);
-                if(got_response){
-                    CHECK(strncmp(received,"HTTP/1.1 200 OK\r\n",17u)==0);
-                    CHECK(strstr(received,"\"miners\":4")!=NULL);
-                }
-
-                (void)close(client_socket);
-            }
-        }else{
-            CHECK(live.listen_socket==STN_TELEMETRY_INVALID_SOCKET);
-        }
+        status.miners=7u;
+        status.hashrate=777777u;
+        stn_telemetry_service_tick(&live,&status,time(NULL));
+        delay_ms(50u);
+        memset(received,0,sizeof(received));
+        CHECK(request_status(test_port,received,sizeof(received))==1);
+        CHECK(strstr(received,"\"miners\":7")!=NULL);
+        CHECK(strstr(received,"\"hashrate\":777777")!=NULL);
 
         stn_telemetry_service_close(&live);
+        CHECK(live.worker_started==0);
         CHECK(live.listen_socket==STN_TELEMETRY_INVALID_SOCKET);
         CHECK(live.clients==NULL);
         CHECK(live.client_count==0u);
@@ -213,4 +200,3 @@ int main(void)
     printf("Telemetry module: %u checks, %u failures.\n",checks,failures);
     return failures!=0u ? 1 : 0;
 }
-/* [End AI:GPT-5.6 Sol] */

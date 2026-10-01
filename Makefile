@@ -36,7 +36,7 @@ SERVICE_SOURCE := platforms/linux/stn-stratum.service
 SERVICE_TARGET := $(SERVICEDIR)/stn-stratum.service
 
 CPPFLAGS := -D_POSIX_C_SOURCE=200809L -Iincludes -Iplatforms
-CFLAGS   := -std=c17 -Wall -Wextra -Wpedantic -Werror -O2
+CFLAGS   := -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -pthread
 
 COMMON_SOURCES := \
 	src/main.c \
