@@ -6,7 +6,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <windows.h>
 
 #include <limits.h>
 #include <stdio.h>
@@ -102,21 +101,14 @@ static int send_all(SOCKET s,const uint8_t *p,size_t n)
     return 1;
 }
 
-static int recv_all(stn_rpc_win32 *t,SOCKET s,uint8_t *p,size_t n)
+static int recv_all(SOCKET s,uint8_t *p,size_t n)
 {
-    ULONGLONG start=GetTickCount64();
     while(n!=0u){
-        fd_set reads;struct timeval wait;int ready,got;
         int chunk=(n>(size_t)INT_MAX)?INT_MAX:(int)n;
-        if(t->idle!=NULL){t->idle(t->idle_user);}
-        if(GetTickCount64()-start>=5000u){return 0;}
-        FD_ZERO(&reads);FD_SET(s,&reads);wait.tv_sec=0;wait.tv_usec=100000;
-        ready=select(0,&reads,NULL,NULL,&wait);
-        if(ready==SOCKET_ERROR){if(WSAGetLastError()==WSAEINTR){continue;}return 0;}
-        if(ready==0){continue;}
-        got=recv(s,(char *)p,chunk,0);
+        int got=recv(s,(char *)p,chunk,0);
         if(got<=0){return 0;}
-        p+=(size_t)got;n-=(size_t)got;
+        p+=(size_t)got;
+        n-=(size_t)got;
     }
     return 1;
 }
@@ -137,14 +129,14 @@ static int exchange_once(
     s=current_socket(t);
 
     if(!send_all(s,request,request_length)){drop_socket(t);return 0;}
-    if(!recv_all(t,s,response,24u)){drop_socket(t);return 0;}
+    if(!recv_all(s,response,24u)){drop_socket(t);return 0;}
 
     payload_length=read32be(response+20);
     frame_length=24u+(size_t)payload_length;
     if(frame_length>response_capacity){drop_socket(t);return 0;}
 
     if(payload_length!=0u &&
-       !recv_all(t,s,response+24,payload_length))
+       !recv_all(s,response+24,payload_length))
     {
         drop_socket(t);
         return 0;
@@ -160,8 +152,6 @@ void stn_rpc_win32_init(
     uint16_t port)
 {
     if(transport!=NULL){
-        transport->idle=NULL;
-        transport->idle_user=NULL;
         transport->host=host;
         transport->port=port;
         transport->socket_handle=STN_INVALID_SOCKET_HANDLE;
@@ -218,8 +208,6 @@ void stn_rpc_win32_init(
     uint16_t port)
 {
     if(transport!=NULL){
-        transport->idle=NULL;
-        transport->idle_user=NULL;
         transport->host=host;
         transport->port=port;
         transport->socket_handle=0;

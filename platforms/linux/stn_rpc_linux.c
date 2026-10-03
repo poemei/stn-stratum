@@ -10,8 +10,6 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
-#include <sys/select.h>
-#include <time.h>
 #include <unistd.h>
 
 #define STN_INVALID_SOCKET_FD (-1)
@@ -146,25 +144,30 @@ static int send_all(
     return 1;
 }
 
-static int recv_all(stn_rpc_linux *t,int s,uint8_t *p,size_t n)
+static int recv_all(
+    int s,
+    uint8_t *p,
+    size_t n)
 {
-    struct timespec start,now;
-    if(s>=FD_SETSIZE || clock_gettime(CLOCK_MONOTONIC,&start)!=0){return 0;}
     while(n!=0u){
-        fd_set reads;struct timeval wait;int ready;ssize_t got;
-        if(t->idle!=NULL){t->idle(t->idle_user);}
-        if(clock_gettime(CLOCK_MONOTONIC,&now)!=0 ||
-           (now.tv_sec-start.tv_sec)*1000+(now.tv_nsec-start.tv_nsec)/1000000>=
-               STN_RPC_IO_TIMEOUT_SECONDS*1000){return 0;}
-        FD_ZERO(&reads);FD_SET(s,&reads);wait.tv_sec=0;wait.tv_usec=100000;
-        ready=select(s+1,&reads,NULL,NULL,&wait);
-        if(ready<0){if(errno==EINTR){continue;}return 0;}
-        if(ready==0){continue;}
-        got=recv(s,p,n,0);
-        if(got<0){if(errno==EINTR){continue;}return 0;}
-        if(got==0){return 0;}
-        p+=(size_t)got;n-=(size_t)got;
+        ssize_t got=recv(s,p,n,0);
+
+        if(got<0){
+            if(errno==EINTR){
+                continue;
+            }
+
+            return 0;
+        }
+
+        if(got==0){
+            return 0;
+        }
+
+        p+=(size_t)got;
+        n-=(size_t)got;
     }
+
     return 1;
 }
 
@@ -191,7 +194,7 @@ static int exchange_once(
         return 0;
     }
 
-    if(!recv_all(t,s,response,24u)){
+    if(!recv_all(s,response,24u)){
         drop_socket(t);
         return 0;
     }
@@ -206,7 +209,7 @@ static int exchange_once(
 
     if(payload_length!=0u &&
        !recv_all(
-           t,s,
+           s,
            response+24u,
            (size_t)payload_length))
     {
@@ -224,8 +227,6 @@ void stn_rpc_linux_init(
     uint16_t port)
 {
     if(transport!=NULL){
-        transport->idle=NULL;
-        transport->idle_user=NULL;
         transport->host=host;
         transport->port=port;
         transport->socket_fd=STN_INVALID_SOCKET_FD;
@@ -304,8 +305,6 @@ void stn_rpc_linux_init(
     uint16_t port)
 {
     if(transport!=NULL){
-        transport->idle=NULL;
-        transport->idle_user=NULL;
         transport->host=host;
         transport->port=port;
         transport->socket_fd=-1;

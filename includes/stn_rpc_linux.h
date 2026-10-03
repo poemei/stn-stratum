@@ -6,9 +6,6 @@
 #include <stdint.h>
 
 typedef struct stn_rpc_linux {
-    /* Nonblocking observation only; must not reenter this transport. */
-    void (*idle)(void *user);
-    void *idle_user;
     const char *host;
     uint16_t port;
     int socket_fd;

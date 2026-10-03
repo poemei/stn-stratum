@@ -15,6 +15,11 @@
 !/tests/test_service_fairness.c
 !/tests/test_telemetry_rpc_wait.c
 
+# Dev Tools
+/tools/
+
+
+
 # Visual Studio per-user state and caches
 .vs/
 *.suo
